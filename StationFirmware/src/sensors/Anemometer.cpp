@@ -21,6 +21,7 @@ void Anemometer::begin() {
   if (digitalPinToInterrupt(_pin) == NOT_AN_INTERRUPT) {
     // Handle error - perhaps log to Serial or set an error flag
     // For now, we'll just prevent attaching the interrupt
+    Serial.println("[fatal] Configured Anemometer pin is not an interrupt!");
     return;
   }
 
