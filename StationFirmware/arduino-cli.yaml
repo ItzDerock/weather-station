@@ -1,0 +1,7 @@
+board_manager:
+    additional_urls: []
+directories:
+    data: /nix/store/92zd4124vz4l484i4khy8ldfywnb6p15-arduino-data
+    user: /nix/store/cc1sk7y63lfs0s5b6prcywd254wvvjdx-arduino-libraries
+updater:
+    enable_notification: false

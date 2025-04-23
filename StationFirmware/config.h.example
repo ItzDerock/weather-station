@@ -1,0 +1,18 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// GPRS credentials
+// if using particle.io, the APN is "particle"
+constexpr const char *APN = "";
+constexpr const char *GPRS_USER = "";
+constexpr const char *GPRS_PASS = "";
+
+// MQTT configuration for where to publish the data
+constexpr const char *MQTT_HOST = "myhost.com";
+constexpr       int   MQTT_PORT = 1883;
+constexpr const char *MQTT_USER = "myuser";
+constexpr const char *MQTT_PASS = "wow";
+constexpr const char *MQTT_TOPIC = "mytopic";
+constexpr const char *MQTT_CLIENT_ID = "myclientid";
+
+#endif // CONFIG_H
