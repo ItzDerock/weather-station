@@ -5,4 +5,6 @@ Uploads data to MQTT w/ TLS support.
 - `StationFirmware/` contains the firmware code
 - `StationFirmware/config.h` contains configuration parameters (i.e. MQTT URL)
 
+Currently rewriting to ESP-IDF from Arduino, ESP-IDF code in `firmware/`
+
 A `flake.nix` is provided to set up the development environment.
