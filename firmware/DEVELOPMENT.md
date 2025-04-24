@@ -27,3 +27,17 @@ Furthermore, its best you compile the firmware at least once to generate a valid
 # Editor tasks
 
 If you are using zeditor, you can press `ALT` + `SHIFT` + `T` to see a list of tasks. Currently there is compile, upload, and serial monitor. See `.zed/tasks.json`.
+
+# Directory Structure
+
+- `main/` for the main application code
+- `components/` for individual sensor libraries
+
+# Adding libraries
+
+Add as a git submodule. Must have a CMakeLists.txt file in the root directory. Must support ESP-IDF and not be an Arduino-only library.
+
+```bash
+git submodule add <repository_url> components/<library_name>
+git submodule update --init --recursive
+```
