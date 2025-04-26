@@ -5,6 +5,7 @@
 #include "esp_sleep.h"
 #include "freertos/idf_additions.h"
 #include "freertos/projdefs.h"
+#include "ulp_riscv.h"
 
 void app_main(void) {
   char *taskName = pcTaskGetName(NULL);
@@ -26,6 +27,7 @@ void app_main(void) {
     ESP_LOGI(taskName, "Wakeup reason: %d", cause);
 
     // load the ULP firmware
+    ulp_riscv_reset();
     argentdata_init_gpio();
     argentdata_init_ulp();
 
@@ -33,9 +35,14 @@ void app_main(void) {
   }
 
   struct ArgentSensorData argentData = {0};
+  argentdata_reset_counts();
 
   while (true) {
-    argentdata_read_sensors(&argentData);
+    argentdata_read_values(&argentData);
+    ESP_LOGI(taskName, "Wind speed: %f mph", argentData.wind_speed);
+    ESP_LOGI(taskName, "Wind speed (gust): %f mph", argentData.wind_speed_gust);
+    ESP_LOGI(taskName, "Rainfall: %f in/min", argentData.rainfall);
+
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }

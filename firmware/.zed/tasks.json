@@ -54,5 +54,11 @@
     "command": "idf.py fullclean",
     "reveal_target": "center",
     "hide": "on_success"
+  },
+  {
+    "label": "Build Flash Monitor",
+    "command": "idf.py build flash monitor",
+    "reveal_target": "dock",
+    "hide": "never"
   }
 ]

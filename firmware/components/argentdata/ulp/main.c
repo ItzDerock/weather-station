@@ -7,9 +7,9 @@
  */
 
 #include "esp_attr.h"
-#include "esp_err.h"
 #include "soc/rtc_io_reg.h"
 #include "soc/soc.h"
+#include "ulp_riscv.h"
 #include "ulp_riscv_gpio.h"
 #include "ulp_riscv_utils.h"
 #include <stdint.h>
@@ -20,14 +20,26 @@
 #define RAIN_GAUGE_GPIO 12
 
 // There's no hardware debouncing, so must do this ourselves
-#define DEBOUNCE_CYCLES 50
+#define DEBOUNCE_CYCLES 500
 
-// Current count for this period (between timer wakeups)
-RTC_DATA_ATTR uint32_t current_anemometer_count = 0;
-// Total count until main CPU resets (for 10-min averages)
-RTC_DATA_ATTR uint32_t total_anemometer_count = 0;
-// The maximum count since last main CPU Reset (for gusts)
-RTC_DATA_ATTR uint32_t max_anemometer_count = 0;
+/* Wind speed. Need a moving 3-second window. */
+
+// Tick counter for the current 1-second interval
+RTC_DATA_ATTR uint32_t anem_ticks_current_second = 0;
+
+// Tick counts for the previous three seconds (sliding window)
+RTC_DATA_ATTR uint32_t anem_ticks_sec_minus_1 = 0;
+RTC_DATA_ATTR uint32_t anem_ticks_sec_minus_2 = 0;
+RTC_DATA_ATTR uint32_t anem_ticks_sec_minus_3 = 0;
+
+// Maximum sum of ticks observed in any 3-second window since last reset
+RTC_DATA_ATTR uint32_t max_anem_ticks_3_sec = 0;
+
+// Total anemometer ticks since last main CPU reset (for average speed)
+RTC_DATA_ATTR uint32_t anem_ticks_total = 0;
+
+/* Other sensors */
+
 // Total rain gauge count
 RTC_DATA_ATTR uint32_t rain_gauge_count = 0;
 RTC_DATA_ATTR uint8_t ulp_initialized = 0;
@@ -38,16 +50,48 @@ RTC_DATA_ATTR int8_t ulp_error_flags = 0;
 #define ULP_ERR_FLAG_BUS_ERROR (1 << 2)
 #define ULP_ERR_FLAG_UNKNOWN_IRQ (1 << 3)
 
-static void anemometer_isr() { current_anemometer_count++; }
+/* clang-format off */
+// Interrupt flags
+// Stored in Q1 register
+#define ULP_RISCV_TIMER_INT                         (1 << 0U)   /* Internal Timer Interrupt */
+#define ULP_RISCV_EBREAK_ECALL_ILLEGAL_INSN_INT     (1 << 1U)   /* EBREAK, ECALL or Illegal instruction */
+#define ULP_RISCV_BUS_ERROR_INT                     (1 << 2U)   /* Bus Error (Unaligned Memory Access) */
+#define ULP_RISCV_PERIPHERAL_INTERRUPT              (1 << 31U)  /* RTC Peripheral Interrupt */
+#define ULP_RISCV_INTERNAL_INTERRUPT                (ULP_RISCV_TIMER_INT | ULP_RISCV_EBREAK_ECALL_ILLEGAL_INSN_INT | ULP_RISCV_BUS_ERROR_INT)
+/* clang-format on */
+
+static void anemometer_isr() {
+  anem_ticks_current_second++; // Count for the current 1-sec interval
+  anem_ticks_total++;          // Accumulate total count
+}
+
 static void rain_gauge_isr() { rain_gauge_count++; }
 
 // wakeup period defined in argentdata.h
+// currently every 1 second
 static void ulp_timer_isr() {
-  if (current_anemometer_count > max_anemometer_count) {
-    max_anemometer_count = current_anemometer_count;
-  }
+  // Capture the count from the second that just ended
+  uint32_t ticks_finished_second = anem_ticks_current_second;
 
-  current_anemometer_count = 0;
+  // Reset the counter for the next second (t+1)
+  anem_ticks_current_second = 0;
+
+  // Shift the sliding window variables
+  // (Oldest count drops out)
+  anem_ticks_sec_minus_3 = anem_ticks_sec_minus_2; // t-3 = t-2
+  anem_ticks_sec_minus_2 = anem_ticks_sec_minus_1; // t-2 = t-1
+  anem_ticks_sec_minus_1 = ticks_finished_second;  // Newest count enters
+
+  // Calculate the sum over the last 3 seconds
+  // Note: At startup, the first couple of sums will be incomplete until
+  // the window fills. This is acceptable because it'll run 24/7.
+  uint32_t current_3_sec_sum =
+      anem_ticks_sec_minus_1 + anem_ticks_sec_minus_2 + anem_ticks_sec_minus_3;
+
+  // Update the maximum 3-second sum if needed
+  if (current_3_sec_sum > max_anem_ticks_3_sec) {
+    max_anem_ticks_3_sec = current_3_sec_sum;
+  }
 }
 
 /**
@@ -57,34 +101,32 @@ static void ulp_timer_isr() {
  *
  * Default interrupt handler has "// TODO" for timer interrupts which we need.
  */
-void _ulp_riscv_interrupt_handler(uint32_t cause_q1) {
+void _ulp_riscv_interrupt_handler(uint32_t q1) {
   // cause_q1 contains the IRQ number (0 for timer, 31 for peripheral, etc.)
 
-  if (cause_q1 == 0) { // IRQ 0: Internal Timer Interrupt
+  // IRQ 0: Internal Timer Interrupt
+  if (q1 & ULP_RISCV_INTERNAL_INTERRUPT) {
     ulp_timer_isr();
-  } else if (cause_q1 & (1U << 31)) { // IRQ 31: RTC Peripheral Interrupt
+  }
+
+  // IRQ 31: RTC Peripheral Interrupt
+  if (q1 & ULP_RISCV_PERIPHERAL_INTERRUPT) {
     uint32_t rtc_io_status =
         REG_GET_FIELD(RTC_GPIO_STATUS_REG, RTC_GPIO_STATUS_INT);
 
     if (rtc_io_status & (1U << ANEMOMETER_GPIO)) {
       anemometer_isr();
-
-      // Clear the specific GPIO interrupt status bit
-      WRITE_PERI_REG(RTC_GPIO_STATUS_W1TC_REG, (1U << ANEMOMETER_GPIO));
     }
 
     if (rtc_io_status & (1U << RAIN_GAUGE_GPIO)) {
       rain_gauge_isr();
-
-      // Clear the specific GPIO interrupt status bit
-      WRITE_PERI_REG(RTC_GPIO_STATUS_W1TC_REG, (1U << RAIN_GAUGE_GPIO));
     }
 
-    // Ignore other ISRs
-
-  } else if (cause_q1 & (1U << 1)) { // IRQ 1: EBREAK/ECALL/Illegal Instruction
+    REG_SET_FIELD(RTC_GPIO_STATUS_W1TC_REG, RTC_GPIO_STATUS_INT_W1TC,
+                  rtc_io_status);
+  } else if (q1 & (1U << 1)) { // IRQ 1: EBREAK/ECALL/Illegal Instruction
     ulp_error_flags |= ULP_ERR_FLAG_ILLEGAL_INSN;
-  } else if (cause_q1 & (1U << 2)) { // IRQ 2: Bus Error
+  } else if (q1 & (1U << 2)) { // IRQ 2: Bus Error
     ulp_error_flags |= ULP_ERR_FLAG_BUS_ERROR;
   } else {
     // Unknown interrupt cause
@@ -93,10 +135,22 @@ void _ulp_riscv_interrupt_handler(uint32_t cause_q1) {
 }
 
 int main(void) {
-  // Our software debounce.
-  // When ULP is awake, interrupts are dropped.
-  ulp_riscv_delay_cycles(DEBOUNCE_CYCLES);
+  // Main only called by timer.
+  ulp_timer_isr();
+
+  // ulp_riscv_gpio_init(RAIN_GAUGE_GPIO);
+  // ulp_riscv_gpio_input_enable(RAIN_GAUGE_GPIO);
+
+  // ulp_riscv_gpio_init(ANEMOMETER_GPIO);
+  // ulp_riscv_gpio_input_enable(ANEMOMETER_GPIO);
+
+  // ulp_riscv_timer_resume();
 
   // halts and waits for next interrupt
+  // while (1) {
+  //   ulp_riscv_delay_cycles(DEBOUNCE_CYCLES);
+  //   ulp_riscv_halt();
+  // }
+  // ulp_error_flags++;
   return 0;
 }
