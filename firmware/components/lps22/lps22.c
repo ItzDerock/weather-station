@@ -2,11 +2,12 @@
 #include "FreeRTOSConfig.h"
 #include "driver/i2c_master.h"
 #include "driver/i2c_types.h"
+#include "esp_check.h"
 #include "esp_log.h"
 #include "portmacro.h"
 #include <stdio.h>
 
-const int I2C_MASTER_TIMEOUT = 1000 / portTICK_PERIOD_MS;
+static const int I2C_MASTER_TIMEOUT = 200 / portTICK_PERIOD_MS;
 static const char *TAG = "lps22";
 
 static esp_err_t write_lps22_register(i2c_master_dev_handle_t dev,
@@ -32,11 +33,8 @@ esp_err_t lps22_init(i2c_master_bus_handle_t bus_handle,
   esp_err_t err =
       i2c_master_bus_add_device(bus_handle, &lps22_config, ret_device);
 
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to add LPS22 device at address 0x%02X: %s", address,
-             esp_err_to_name(err));
-    return err;
-  }
+  ESP_RETURN_ON_ERROR(err, TAG, "Failed to add LPS22 device at address 0x%02X",
+                      address);
 
   // Set ODR (Output Data Rate) to 10 Hz
   uint8_t ctrl_reg1_value = 0x20;
@@ -61,10 +59,7 @@ esp_err_t lps22_read_data(i2c_master_dev_handle_t handle, float *pressure_hpa) {
   esp_err_t err = i2c_master_transmit_receive(
       handle, &start_reg, 1, read_buffer, 3, I2C_MASTER_TIMEOUT);
 
-  if (err != ESP_OK) {
-    ESP_LOGE("lps22", "I2C transmit/receive failed: %s", esp_err_to_name(err));
-    return err;
-  }
+  ESP_RETURN_ON_ERROR(err, TAG, "Failed to read data from LPS22 sensor!");
 
   // read_buffer[0] = LPS22_PRESS_OUT_XL_REG
   // read_buffer[1] = LPS22_PRESS_OUT_L_REG
