@@ -1,11 +1,19 @@
 #include <stdio.h>
 
 #include "argentdata.h"
+#include "driver/i2c_master.h"
+#include "driver/i2c_types.h"
+#include "esp_err.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "freertos/idf_additions.h"
 #include "freertos/projdefs.h"
+#include "hal/i2c_types.h"
+#include "lps22.h"
+#include "soc/clk_tree_defs.h"
 #include "ulp_riscv.h"
+
+static void setup_i2c(i2c_master_bus_handle_t *bus_handle);
 
 void app_main(void) {
   char *taskName = pcTaskGetName(NULL);
@@ -34,15 +42,45 @@ void app_main(void) {
     break;
   }
 
+  // initialize i2c
+  i2c_master_bus_handle_t bus_handle;
+  setup_i2c(&bus_handle);
+
+  // initialize each device
+  i2c_master_dev_handle_t lps22_handle;
+  esp_err_t lpsok = lps22_init(bus_handle, &lps22_handle, LPS22_DEFAULT_ADDR);
+
   struct ArgentSensorData argentData = {0};
   argentdata_reset_counts();
 
   while (true) {
+    // test argentdata
     argentdata_read_values(&argentData);
     ESP_LOGI(taskName, "Wind speed: %f mph", argentData.wind_speed);
     ESP_LOGI(taskName, "Wind speed (gust): %f mph", argentData.wind_speed_gust);
     ESP_LOGI(taskName, "Rainfall: %f in/min", argentData.rainfall);
 
+    // test lps22
+    if (lpsok == ESP_OK) {
+      float pressure_hpa = 0.0f;
+      esp_err_t err = lps22_read_data(lps22_handle, &pressure_hpa);
+
+      if (err == ESP_OK) {
+        ESP_LOGI(taskName, "Pressure: %.2f hPa", pressure_hpa);
+      }
+    }
+
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
+}
+
+static void setup_i2c(i2c_master_bus_handle_t *bus_handle) {
+  i2c_master_bus_config_t config = {.sda_io_num = GPIO_NUM_45,
+                                    .scl_io_num = GPIO_NUM_48,
+                                    .clk_source = I2C_CLK_SRC_DEFAULT,
+                                    .i2c_port = I2C_NUM_0,
+                                    .glitch_ignore_cnt = 7,
+                                    .flags.enable_internal_pullup = true};
+
+  ESP_ERROR_CHECK(i2c_new_master_bus(&config, bus_handle));
 }
