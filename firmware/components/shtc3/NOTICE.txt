@@ -1,0 +1,10 @@
+This file is provided for compliance with the Apache-2.0 license.
+
+This SHTC3 sensor driver is a derivative of the SHT3x driver found at:
+  - https://github.com/pedrominatel/esp-components/
+
+With the following changes
+  - Delay after wakeup to allow the sensor to activate
+  - Increased timeout for I2C read/write operations due to the sensor's use of clock stretching.
+
+All code under the `components/shtc3` directory is licensed under the Apache-2.0 license.

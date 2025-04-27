@@ -10,6 +10,7 @@
 #include "freertos/projdefs.h"
 #include "hal/i2c_types.h"
 #include "lps22.h"
+#include "shtc3.h"
 #include "soc/clk_tree_defs.h"
 #include "ulp_riscv.h"
 
@@ -46,9 +47,23 @@ void app_main(void) {
   i2c_master_bus_handle_t bus_handle;
   setup_i2c(&bus_handle);
 
+  // esp_task_wdt_reset();
+
   // initialize each device
   i2c_master_dev_handle_t lps22_handle;
   esp_err_t lpsok = lps22_init(bus_handle, &lps22_handle, LPS22_DEFAULT_ADDR);
+
+  esp_err_t err = i2c_master_probe(bus_handle, SHTC3_I2C_ADDR, 200);
+  if (err != ESP_OK) {
+    ESP_LOGE(taskName, "Failed to probe SHTC3: %s", esp_err_to_name(err));
+    return;
+  } else {
+    ESP_LOGI(taskName, "SHTC3 probe successful");
+  }
+
+  // TODO: gracefully handle failure
+  i2c_master_dev_handle_t shtc3_handle = shtc3_device_create(
+      bus_handle, SHTC3_I2C_ADDR, CONFIG_SHTC3_I2C_CLK_SPEED_HZ);
 
   struct ArgentSensorData argentData = {0};
   argentdata_reset_counts();
@@ -67,8 +82,23 @@ void app_main(void) {
 
       if (err == ESP_OK) {
         ESP_LOGI(taskName, "Pressure: %.2f hPa", pressure_hpa);
+      } else {
+        ESP_LOGE(taskName, "Failed to read LPS22 data: %s",
+                 esp_err_to_name(err));
       }
+    } else {
+      ESP_LOGE(taskName, "Failed to initialize LPS22 sensor: %s",
+               esp_err_to_name(lpsok));
     }
+
+    // test shtc3
+    // CSE = Clock Stretching Enabled
+    // NM = Normal Mode (as opposed to low power mode)
+    float temperature, humidity;
+    shtc3_get_th(shtc3_handle, SHTC3_REG_T_CSE_NM, &temperature, &humidity);
+
+    ESP_LOGI(taskName, "Temperature: %.2f C", temperature);
+    ESP_LOGI(taskName, "Humidity: %.2f %%", humidity);
 
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
