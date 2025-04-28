@@ -12,6 +12,7 @@
 #include "lps22.h"
 #include "ltr390uv.h"
 #include "shtc3.h"
+#include "sim7080g_driver_esp_idf.h"
 #include "soc/clk_tree_defs.h"
 #include "ulp_riscv.h"
 
@@ -88,14 +89,12 @@ extern "C" void app_main(void) {
     // test lps22
     if (lpsok == ESP_OK) {
       float pressure_hpa = 0.0f;
-      esp_err_t err = lps22_read_data(lps22_handle, &pressure_hpa);
+      float lps_temperature = 0.0f;
+      lps22_read_pressure(lps22_handle, &pressure_hpa);
+      lps22_read_temperature(lps22_handle, &lps_temperature);
 
-      if (err == ESP_OK) {
-        ESP_LOGI(taskName, "Pressure: %.2f hPa", pressure_hpa);
-      } else {
-        ESP_LOGE(taskName, "Failed to read LPS22 data: %s",
-                 esp_err_to_name(err));
-      }
+      ESP_LOGI(taskName, "Pressure: %.2f hPa", pressure_hpa);
+      ESP_LOGI(taskName, "Temperature (LPS22): %.2f C", lps_temperature);
     } else {
       ESP_LOGE(taskName, "Failed to initialize LPS22 sensor: %s",
                esp_err_to_name(lpsok));

@@ -49,7 +49,8 @@ esp_err_t lps22_init(i2c_master_bus_handle_t bus_handle,
   return ESP_OK;
 }
 
-esp_err_t lps22_read_data(i2c_master_dev_handle_t handle, float *pressure_hpa) {
+esp_err_t lps22_read_pressure(i2c_master_dev_handle_t handle,
+                              float *pressure_hpa) {
   // Pressure is stored into 3 registers that need to be combined
   uint8_t start_reg = LPS22_PRESS_OUT_XL_REG;
   uint8_t read_buffer[3];
@@ -73,6 +74,24 @@ esp_err_t lps22_read_data(i2c_master_dev_handle_t handle, float *pressure_hpa) {
 
   ESP_LOGD("lps22", "Read raw pressure: %lu -> %.2f hPa", pressure_raw,
            *pressure_hpa);
+
+  return ESP_OK;
+}
+
+esp_err_t lps22_read_temperature(i2c_master_dev_handle_t handle,
+                                 float *temperature) {
+  uint8_t start_reg = LPS22_TEMP_OUT_L_REG;
+  uint8_t read_buffer[2];
+
+  esp_err_t err = i2c_master_transmit_receive(
+      handle, &start_reg, 1, read_buffer, 2, I2C_MASTER_TIMEOUT);
+
+  ESP_RETURN_ON_ERROR(err, TAG, "Failed to read temperature from LPS22");
+
+  uint16_t temperature_raw =
+      ((uint16_t)read_buffer[1] << 8) | (uint16_t)read_buffer[0];
+
+  *temperature = (float)temperature_raw / 100;
 
   return ESP_OK;
 }

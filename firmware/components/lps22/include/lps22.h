@@ -6,6 +6,8 @@
 #define LPS22_PRESS_OUT_H_REG 0x2A
 #define LPS22_PRESS_OUT_L_REG 0x29
 #define LPS22_PRESS_OUT_XL_REG 0x28
+#define LPS22_TEMP_OUT_L_REG 0x2B
+#define LPS22_TEMP_OUT_H_REG 0x2C
 #define LPS22_DEFAULT_ADDR 0x5D
 #define LPS22_SCL_SPEED_HZ 100000 // 100kHz
 
@@ -24,7 +26,14 @@ esp_err_t lps22_init(i2c_master_bus_handle_t bus_handle,
  * Reads the pressure and returns it in the pressure_hpa pointer.
  * The pressure is in hPa.
  */
-esp_err_t lps22_read_data(i2c_master_dev_handle_t handle, float *pressure_hpa);
+esp_err_t lps22_read_pressure(i2c_master_dev_handle_t handle,
+                              float *pressure_hpa);
+
+/**
+ * Reads temperature (in C)
+ */
+esp_err_t lps22_read_temperature(i2c_master_dev_handle_t handle,
+                                 float *temperature);
 
 #ifdef __cplusplus
 }
