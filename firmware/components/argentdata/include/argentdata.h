@@ -16,6 +16,10 @@ extern const float RAIN_PER_TIP_FACTOR;        // mm/tip
 extern const float REPORTING_INTERVAL_SECONDS; // 10 minutes
 extern const float GUST_INTERVAL_SECONDS;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct ArgentSensorData {
   // mph
   float wind_speed;
@@ -46,3 +50,7 @@ void argentdata_reset_counts(void);
  * Reads the data from the ULP and places it into the data pointer.
  */
 void argentdata_read_values(struct ArgentSensorData *data);
+
+#ifdef __cplusplus
+}
+#endif

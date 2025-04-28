@@ -9,6 +9,10 @@
 #define LPS22_DEFAULT_ADDR 0x5D
 #define LPS22_SCL_SPEED_HZ 100000 // 100kHz
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * Creates a new I2C device handle for the LPS22.
  * Address should default to LPS22_DEFAULT_ADDR.
@@ -21,3 +25,7 @@ esp_err_t lps22_init(i2c_master_bus_handle_t bus_handle,
  * The pressure is in hPa.
  */
 esp_err_t lps22_read_data(i2c_master_dev_handle_t handle, float *pressure_hpa);
+
+#ifdef __cplusplus
+}
+#endif

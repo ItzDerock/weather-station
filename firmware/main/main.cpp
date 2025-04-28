@@ -15,10 +15,13 @@
 #include "soc/clk_tree_defs.h"
 #include "ulp_riscv.h"
 
+#define XPOWERS_CHIP_AXP2101
+#include "XPowersLib.h"
+
 static void setup_i2c(i2c_master_bus_handle_t *bus_handle);
 
-void app_main(void) {
-  char *taskName = pcTaskGetName(NULL);
+extern "C" void app_main(void) {
+  char *taskName = pcTaskGetName(nullptr);
   ESP_LOGI(taskName, "StationFirmware starting.");
 
   // Wait 1 second to allow for USB serial connection
@@ -48,11 +51,14 @@ void app_main(void) {
   i2c_master_bus_handle_t bus_handle;
   setup_i2c(&bus_handle);
 
-  // initialize lps22
+  // initialize PMU chip
+  XPowersPMU pmu;
+  pmu.begin(bus_handle, AXP2101_SLAVE_ADDRESS);
+
+  // initialize each device
   i2c_master_dev_handle_t lps22_handle;
   esp_err_t lpsok = lps22_init(bus_handle, &lps22_handle, LPS22_DEFAULT_ADDR);
 
-  // initialize shtc3
   // TODO: gracefully handle failure
   i2c_master_dev_handle_t shtc3_handle = shtc3_device_create(
       bus_handle, SHTC3_I2C_ADDR, CONFIG_SHTC3_I2C_CLK_SPEED_HZ);
@@ -67,7 +73,7 @@ void app_main(void) {
     assert(dev_hdl);
   }
 
-  struct ArgentSensorData argentData = {0};
+  struct ArgentSensorData argentData = {0, 0, 0};
   argentdata_reset_counts();
 
   while (true) {
@@ -117,12 +123,15 @@ void app_main(void) {
 }
 
 static void setup_i2c(i2c_master_bus_handle_t *bus_handle) {
-  i2c_master_bus_config_t config = {.sda_io_num = GPIO_NUM_45,
-                                    .scl_io_num = GPIO_NUM_48,
-                                    .clk_source = I2C_CLK_SRC_DEFAULT,
-                                    .i2c_port = I2C_NUM_0,
-                                    .glitch_ignore_cnt = 7,
-                                    .flags.enable_internal_pullup = true};
+  i2c_master_bus_config_t config = {
+      .i2c_port = I2C_NUM_0,
+      .sda_io_num = GPIO_NUM_45,
+      .scl_io_num = GPIO_NUM_48,
+      .clk_source = I2C_CLK_SRC_DEFAULT,
+      .glitch_ignore_cnt = 7,
+      .intr_priority = 0,
+      .trans_queue_depth = 0,
+      .flags = {.enable_internal_pullup = true, .allow_pd = false}};
 
   ESP_ERROR_CHECK(i2c_new_master_bus(&config, bus_handle));
 }
