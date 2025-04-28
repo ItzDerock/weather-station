@@ -10,6 +10,7 @@
 #include "freertos/projdefs.h"
 #include "hal/i2c_types.h"
 #include "lps22.h"
+#include "ltr390uv.h"
 #include "shtc3.h"
 #include "soc/clk_tree_defs.h"
 #include "ulp_riscv.h"
@@ -47,23 +48,24 @@ void app_main(void) {
   i2c_master_bus_handle_t bus_handle;
   setup_i2c(&bus_handle);
 
-  // esp_task_wdt_reset();
-
-  // initialize each device
+  // initialize lps22
   i2c_master_dev_handle_t lps22_handle;
   esp_err_t lpsok = lps22_init(bus_handle, &lps22_handle, LPS22_DEFAULT_ADDR);
 
-  esp_err_t err = i2c_master_probe(bus_handle, SHTC3_I2C_ADDR, 200);
-  if (err != ESP_OK) {
-    ESP_LOGE(taskName, "Failed to probe SHTC3: %s", esp_err_to_name(err));
-    return;
-  } else {
-    ESP_LOGI(taskName, "SHTC3 probe successful");
-  }
-
+  // initialize shtc3
   // TODO: gracefully handle failure
   i2c_master_dev_handle_t shtc3_handle = shtc3_device_create(
       bus_handle, SHTC3_I2C_ADDR, CONFIG_SHTC3_I2C_CLK_SPEED_HZ);
+
+  // initialize ltr390
+  ltr390uv_config_t dev_cfg = I2C_LTR390UV_CONFIG_DEFAULT;
+  ltr390uv_handle_t dev_hdl;
+
+  ltr390uv_init(bus_handle, &dev_cfg, &dev_hdl);
+  if (dev_hdl == NULL) {
+    ESP_LOGE(taskName, "ltr390uv handle init failed");
+    assert(dev_hdl);
+  }
 
   struct ArgentSensorData argentData = {0};
   argentdata_reset_counts();
@@ -99,6 +101,16 @@ void app_main(void) {
 
     ESP_LOGI(taskName, "Temperature: %.2f C", temperature);
     ESP_LOGI(taskName, "Humidity: %.2f %%", humidity);
+
+    // test ltr390
+    float uvi;
+    esp_err_t ltrerr = ltr390uv_get_ultraviolet_index(dev_hdl, &uvi);
+    if (ltrerr != ESP_OK) {
+      ESP_LOGE(taskName, "ltr390uv device read failed (%s)",
+               esp_err_to_name(ltrerr));
+    } else {
+      ESP_LOGI(taskName, "Ultraviolet index: %f", uvi);
+    }
 
     vTaskDelay(pdMS_TO_TICKS(1000));
   }

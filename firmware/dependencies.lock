@@ -1,0 +1,41 @@
+dependencies:
+  idf:
+    source:
+      type: idf
+    version: 5.4.0
+  k0i05/esp_ltr390uv:
+    component_hash: 34b5bc1da82256e86d4e10558014cfc33f61fb1d0a9ddde206215076c0132ead
+    dependencies:
+    - name: idf
+      require: private
+      version: '>5.3.0'
+    - name: k0i05/esp_type_utils
+      registry_url: https://components.espressif.com
+      require: private
+      version: '>=0.0.1'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32
+    - esp32s3
+    version: 1.2.5
+  k0i05/esp_type_utils:
+    component_hash: dfe2feb2117ee060c085ec166b56cfd9d66cef4019216bf8722e45e43a3b562f
+    dependencies:
+    - name: idf
+      require: private
+      version: '>5.3.0'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    targets:
+    - esp32
+    - esp32s3
+    version: 1.2.5
+direct_dependencies:
+- idf
+- k0i05/esp_ltr390uv
+manifest_hash: e0f891dd12d10daa8ec8cabb7bf37ab9e3ab0cc786d20cf283fdafaf2b5774c1
+target: esp32s3
+version: 2.0.0
