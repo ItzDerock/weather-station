@@ -18,7 +18,8 @@
 #define XPOWERS_CHIP_AXP2101
 #include "XPowersLib.h"
 
-static void setup_i2c(i2c_master_bus_handle_t *bus_handle);
+static void setup_i2c(i2c_master_bus_handle_t *bus_handle,
+                      i2c_master_bus_handle_t *bus_pmu_handle);
 
 extern "C" void app_main(void) {
   char *taskName = pcTaskGetName(nullptr);
@@ -49,11 +50,12 @@ extern "C" void app_main(void) {
 
   // initialize i2c
   i2c_master_bus_handle_t bus_handle;
-  setup_i2c(&bus_handle);
+  i2c_master_bus_handle_t bus_pmu_handle;
+  setup_i2c(&bus_handle, &bus_pmu_handle);
 
   // initialize PMU chip
   XPowersPMU pmu;
-  pmu.begin(bus_handle, AXP2101_SLAVE_ADDRESS);
+  pmu.begin(bus_pmu_handle, AXP2101_SLAVE_ADDRESS);
 
   // initialize each device
   i2c_master_dev_handle_t lps22_handle;
@@ -122,7 +124,9 @@ extern "C" void app_main(void) {
   }
 }
 
-static void setup_i2c(i2c_master_bus_handle_t *bus_handle) {
+static void setup_i2c(i2c_master_bus_handle_t *bus_handle,
+                      i2c_master_bus_handle_t *bus_pmu_handle) {
+  // I2C bus for all the sensors
   i2c_master_bus_config_t config = {
       .i2c_port = I2C_NUM_0,
       .sda_io_num = GPIO_NUM_45,
@@ -134,4 +138,17 @@ static void setup_i2c(i2c_master_bus_handle_t *bus_handle) {
       .flags = {.enable_internal_pullup = true, .allow_pd = false}};
 
   ESP_ERROR_CHECK(i2c_new_master_bus(&config, bus_handle));
+
+  // The onboard PMU chip uses SCK -> 7, SDA -> 15
+  i2c_master_bus_config_t pmu_bus_config = {
+      .i2c_port = I2C_NUM_1,
+      .sda_io_num = GPIO_NUM_15,
+      .scl_io_num = GPIO_NUM_7,
+      .clk_source = I2C_CLK_SRC_DEFAULT,
+      .glitch_ignore_cnt = 7,
+      .intr_priority = 0,
+      .trans_queue_depth = 0,
+      .flags = {.enable_internal_pullup = true, .allow_pd = false}};
+
+  ESP_ERROR_CHECK(i2c_new_master_bus(&pmu_bus_config, bus_pmu_handle));
 }
