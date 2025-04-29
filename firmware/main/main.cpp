@@ -55,8 +55,8 @@ extern "C" void app_main(void) {
   setup_i2c(&bus_handle, &bus_pmu_handle);
 
   // initialize PMU chip
-  XPowersPMU pmu;
-  pmu.begin(bus_pmu_handle, AXP2101_SLAVE_ADDRESS);
+  // XPowersPMU pmu;
+  // pmu.begin(bus_pmu_handle, AXP2101_SLAVE_ADDRESS);
 
   // initialize each device
   i2c_master_dev_handle_t lps22_handle;

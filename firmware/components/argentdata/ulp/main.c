@@ -6,18 +6,16 @@
  * time interval.
  */
 
+#include "config.h"
 #include "esp_attr.h"
+#include "hal/adc_types.h"
 #include "soc/rtc_io_reg.h"
 #include "soc/soc.h"
 #include "ulp_riscv.h"
+#include "ulp_riscv_adc_ulp_core.h"
 #include "ulp_riscv_gpio.h"
 #include "ulp_riscv_utils.h"
 #include <stdint.h>
-
-// Must be RTC GPIOs.
-#define ULP_WAKEUP_PERIOD 60 /* 1 minute */
-#define ANEMOMETER_GPIO 11
-#define RAIN_GAUGE_GPIO 12
 
 // There's no hardware debouncing, so must do this ourselves
 #define DEBOUNCE_CYCLES 500
@@ -42,10 +40,15 @@ RTC_DATA_ATTR uint32_t anem_ticks_total = 0;
 
 // Total rain gauge count
 RTC_DATA_ATTR uint32_t rain_gauge_count = 0;
-RTC_DATA_ATTR uint8_t ulp_initialized = 0;
+RTC_DATA_ATTR uint8_t initialized = 0;
+
+// Direction of the wind
+RTC_DATA_ATTR uint32_t wind_direction[10];
+RTC_DATA_ATTR uint8_t wind_direction_index = 0;
+RTC_DATA_ATTR uint8_t wakeup_index = 0;
 
 // Debug flags (0 = ok)
-RTC_DATA_ATTR int8_t ulp_error_flags = 0;
+RTC_DATA_ATTR int8_t error_flags = 0;
 #define ULP_ERR_FLAG_ILLEGAL_INSN (1 << 1)
 #define ULP_ERR_FLAG_BUS_ERROR (1 << 2)
 #define ULP_ERR_FLAG_UNKNOWN_IRQ (1 << 3)
@@ -66,6 +69,14 @@ static void anemometer_isr() {
 }
 
 static void rain_gauge_isr() { rain_gauge_count++; }
+
+static void read_direction() {
+  int32_t result =
+      ulp_riscv_adc_read_channel(WIND_VANE_ADC_UNIT, WIND_VANE_ADC_CHANNEL);
+
+  wind_direction[wind_direction_index] = result;
+  wind_direction_index = (wind_direction_index + 1) % WIND_VANE_KEEP_N;
+}
 
 // wakeup period defined in argentdata.h
 // currently every 1 second
@@ -91,6 +102,12 @@ static void ulp_timer_isr() {
   // Update the maximum 3-second sum if needed
   if (current_3_sec_sum > max_anem_ticks_3_sec) {
     max_anem_ticks_3_sec = current_3_sec_sum;
+  }
+
+  // Every nth wakeup period, measure wind direction
+  if (++wakeup_index % WIND_VANE_MEASUREMENT_INTERVAL == 0) {
+    wakeup_index = 0;
+    read_direction();
   }
 }
 
@@ -125,12 +142,12 @@ void _ulp_riscv_interrupt_handler(uint32_t q1) {
     REG_SET_FIELD(RTC_GPIO_STATUS_W1TC_REG, RTC_GPIO_STATUS_INT_W1TC,
                   rtc_io_status);
   } else if (q1 & (1U << 1)) { // IRQ 1: EBREAK/ECALL/Illegal Instruction
-    ulp_error_flags |= ULP_ERR_FLAG_ILLEGAL_INSN;
+    error_flags |= ULP_ERR_FLAG_ILLEGAL_INSN;
   } else if (q1 & (1U << 2)) { // IRQ 2: Bus Error
-    ulp_error_flags |= ULP_ERR_FLAG_BUS_ERROR;
+    error_flags |= ULP_ERR_FLAG_BUS_ERROR;
   } else {
     // Unknown interrupt cause
-    ulp_error_flags |= ULP_ERR_FLAG_UNKNOWN_IRQ;
+    error_flags |= ULP_ERR_FLAG_UNKNOWN_IRQ;
   }
 }
 

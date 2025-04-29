@@ -1,4 +1,5 @@
 #pragma once
+#include "../ulp/config.h"
 
 // Configuration
 #define ULP_WAKEUP_PERIOD 3000000
@@ -20,6 +21,11 @@ extern const float GUST_INTERVAL_SECONDS;
 extern "C" {
 #endif
 
+struct DirectionLookup {
+  float resistanceOhms;
+  float degrees;
+};
+
 struct ArgentSensorData {
   // mph
   float wind_speed;
@@ -27,6 +33,9 @@ struct ArgentSensorData {
 
   // in/min
   float rainfall;
+
+  // direction
+  float degrees[WIND_VANE_KEEP_N];
 };
 
 /**
