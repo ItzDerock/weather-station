@@ -223,7 +223,7 @@ void argentdata_read_values(struct ArgentSensorData *data) {
         wind_vane_adc_to_direction(ulp_wind_direction[i]);
   }
 
-  for (uint8_t i = 0; i < WIND_VANE_KEEP_N; i++) {
+  for (uint8_t i = 0; i <= ulp_wind_direction_index; i++) {
     data->degrees[resultingIndex++] =
         wind_vane_adc_to_direction(ulp_wind_direction[i]);
   }
