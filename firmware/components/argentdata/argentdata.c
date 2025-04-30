@@ -180,7 +180,7 @@ void argentdata_init_ulp(void) {
   ESP_ERROR_CHECK(err);
 
   // Wake the ULP every 3 seconds
-  ESP_ERROR_CHECK(ulp_set_wakeup_period(0, ULP_WAKEUP_PERIOD));
+  // ESP_ERROR_CHECK(ulp_set_wakeup_period(0, ULP_WAKEUP_PERIOD));
 
   // Start the program
   err = ulp_riscv_run();
@@ -227,6 +227,8 @@ void argentdata_read_values(struct ArgentSensorData *data) {
     data->degrees[resultingIndex++] =
         wind_vane_adc_to_direction(ulp_wind_direction[i]);
   }
+
+  ESP_LOGI("argent", "idx: %d", ulp_wind_direction_index);
 }
 
 /**

@@ -82,42 +82,43 @@ extern "C" void app_main(void) {
   while (true) {
     // test argentdata
     argentdata_read_values(&argentData);
+    ESP_LOGI(taskName, "Latest direction: %f deg", argentData.degrees[0]);
     ESP_LOGI(taskName, "Wind speed: %f mph", argentData.wind_speed);
     ESP_LOGI(taskName, "Wind speed (gust): %f mph", argentData.wind_speed_gust);
     ESP_LOGI(taskName, "Rainfall: %f in/min", argentData.rainfall);
 
-    // test lps22
-    if (lpsok == ESP_OK) {
-      float pressure_hpa = 0.0f;
-      float lps_temperature = 0.0f;
-      lps22_read_pressure(lps22_handle, &pressure_hpa);
-      lps22_read_temperature(lps22_handle, &lps_temperature);
+    // // test lps22
+    // if (lpsok == ESP_OK) {
+    //   float pressure_hpa = 0.0f;
+    //   float lps_temperature = 0.0f;
+    //   lps22_read_pressure(lps22_handle, &pressure_hpa);
+    //   lps22_read_temperature(lps22_handle, &lps_temperature);
 
-      ESP_LOGI(taskName, "Pressure: %.2f hPa", pressure_hpa);
-      ESP_LOGI(taskName, "Temperature (LPS22): %.2f C", lps_temperature);
-    } else {
-      ESP_LOGE(taskName, "Failed to initialize LPS22 sensor: %s",
-               esp_err_to_name(lpsok));
-    }
+    //   ESP_LOGI(taskName, "Pressure: %.2f hPa", pressure_hpa);
+    //   ESP_LOGI(taskName, "Temperature (LPS22): %.2f C", lps_temperature);
+    // } else {
+    //   ESP_LOGE(taskName, "Failed to initialize LPS22 sensor: %s",
+    //            esp_err_to_name(lpsok));
+    // }
 
-    // test shtc3
-    // CSE = Clock Stretching Enabled
-    // NM = Normal Mode (as opposed to low power mode)
-    float temperature, humidity;
-    shtc3_get_th(shtc3_handle, SHTC3_REG_T_CSE_NM, &temperature, &humidity);
+    // // test shtc3
+    // // CSE = Clock Stretching Enabled
+    // // NM = Normal Mode (as opposed to low power mode)
+    // float temperature, humidity;
+    // shtc3_get_th(shtc3_handle, SHTC3_REG_T_CSE_NM, &temperature, &humidity);
 
-    ESP_LOGI(taskName, "Temperature: %.2f C", temperature);
-    ESP_LOGI(taskName, "Humidity: %.2f %%", humidity);
+    // ESP_LOGI(taskName, "Temperature: %.2f C", temperature);
+    // ESP_LOGI(taskName, "Humidity: %.2f %%", humidity);
 
-    // test ltr390
-    float uvi;
-    esp_err_t ltrerr = ltr390uv_get_ultraviolet_index(dev_hdl, &uvi);
-    if (ltrerr != ESP_OK) {
-      ESP_LOGE(taskName, "ltr390uv device read failed (%s)",
-               esp_err_to_name(ltrerr));
-    } else {
-      ESP_LOGI(taskName, "Ultraviolet index: %f", uvi);
-    }
+    // // test ltr390
+    // float uvi;
+    // esp_err_t ltrerr = ltr390uv_get_ultraviolet_index(dev_hdl, &uvi);
+    // if (ltrerr != ESP_OK) {
+    //   ESP_LOGE(taskName, "ltr390uv device read failed (%s)",
+    //            esp_err_to_name(ltrerr));
+    // } else {
+    //   ESP_LOGI(taskName, "Ultraviolet index: %f", uvi);
+    // }
 
     vTaskDelay(pdMS_TO_TICKS(1000));
   }

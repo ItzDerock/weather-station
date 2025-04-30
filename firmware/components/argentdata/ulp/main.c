@@ -14,7 +14,11 @@
 #include "ulp_riscv.h"
 #include "ulp_riscv_adc_ulp_core.h"
 #include "ulp_riscv_gpio.h"
+#include "ulp_riscv_interrupt.h"
+#include "ulp_riscv_register_ops.h"
+#include "ulp_riscv_timer.h"
 #include "ulp_riscv_utils.h"
+#include "ulp_vars.h"
 #include <stdint.h>
 
 // There's no hardware debouncing, so must do this ourselves
@@ -105,10 +109,18 @@ static void ulp_timer_isr() {
   }
 
   // Every nth wakeup period, measure wind direction
-  if (++wakeup_index % WIND_VANE_MEASUREMENT_INTERVAL == 0) {
-    wakeup_index = 0;
+  error_flags = (int8_t)wakeup_index;
+  if (wakeup_index++ == 0) {
+    error_flags++;
     read_direction();
   }
+
+  if (wakeup_index >= WIND_VANE_MEASUREMENT_INTERVAL) {
+    wakeup_index = 0;
+  }
+
+  // instruct CPU to wake up again
+  ulp_riscv_timer_interrupt_clear();
 }
 
 /**
@@ -119,6 +131,7 @@ static void ulp_timer_isr() {
  * Default interrupt handler has "// TODO" for timer interrupts which we need.
  */
 void _ulp_riscv_interrupt_handler(uint32_t q1) {
+  error_flags++;
   // cause_q1 contains the IRQ number (0 for timer, 31 for peripheral, etc.)
 
   // IRQ 0: Internal Timer Interrupt
@@ -152,22 +165,17 @@ void _ulp_riscv_interrupt_handler(uint32_t q1) {
 }
 
 int main(void) {
-  // Main only called by timer.
-  ulp_timer_isr();
+  ulp_timer_isr(); // run immediately to fill data at boot.
 
-  // ulp_riscv_gpio_init(RAIN_GAUGE_GPIO);
-  // ulp_riscv_gpio_input_enable(RAIN_GAUGE_GPIO);
+  // ulp_riscv_isr_vector_init(ulp_timer_isr);
+  ulp_riscv_timer_set_period_us(ULP_WAKEUP_PERIOD);
+  ulp_riscv_timer_interrupt_enable_source(true);
+  ulp_riscv_global_interrupt_enable(true);
 
-  // ulp_riscv_gpio_init(ANEMOMETER_GPIO);
-  // ulp_riscv_gpio_input_enable(ANEMOMETER_GPIO);
+  while (1) {
+    asm volatile("wfi"); // Wait For Interrupt
+    error_flags++;
+  }
 
-  // ulp_riscv_timer_resume();
-
-  // halts and waits for next interrupt
-  // while (1) {
-  //   ulp_riscv_delay_cycles(DEBOUNCE_CYCLES);
-  //   ulp_riscv_halt();
-  // }
-  // ulp_error_flags++;
   return 0;
 }
