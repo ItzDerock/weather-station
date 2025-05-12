@@ -1,3 +1,7 @@
 [submodule "firmware/components/XPowersLib"]
 	path = firmware/components/XPowersLib
 	url = https://github.com/lewisxhe/XPowersLib
+
+[submodule "firmware/components/sim7080g"]
+	path = firmware/components/sim7080g
+	url = https://github.com/ItzDerock/sim7080g_driver_esp_idf

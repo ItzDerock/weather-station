@@ -71,8 +71,10 @@ static void anemometer_isr() {
 static void rain_gauge_isr() { rain_gauge_count++; }
 
 static void read_direction() {
+  error_flags = 2;
   int32_t result =
       ulp_riscv_adc_read_channel(WIND_VANE_ADC_UNIT, WIND_VANE_ADC_CHANNEL);
+  error_flags = 3;
 
   wind_direction[wind_direction_index] = result;
   wind_direction_index = (wind_direction_index + 1) % WIND_VANE_KEEP_N;
@@ -105,10 +107,12 @@ static void ulp_timer_isr() {
   }
 
   // Every nth wakeup period, measure wind direction
-  if (++wakeup_index % WIND_VANE_MEASUREMENT_INTERVAL == 0) {
-    wakeup_index = 0;
+  if (wakeup_index == 0) {
     read_direction();
+    error_flags = 4;
   }
+
+  wakeup_index = (wakeup_index + 1) % WIND_VANE_MEASUREMENT_INTERVAL;
 }
 
 /**
@@ -119,6 +123,7 @@ static void ulp_timer_isr() {
  * Default interrupt handler has "// TODO" for timer interrupts which we need.
  */
 void _ulp_riscv_interrupt_handler(uint32_t q1) {
+  error_flags = 1;
   // cause_q1 contains the IRQ number (0 for timer, 31 for peripheral, etc.)
 
   // IRQ 0: Internal Timer Interrupt
@@ -153,21 +158,8 @@ void _ulp_riscv_interrupt_handler(uint32_t q1) {
 
 int main(void) {
   // Main only called by timer.
+  error_flags++;
   ulp_timer_isr();
 
-  // ulp_riscv_gpio_init(RAIN_GAUGE_GPIO);
-  // ulp_riscv_gpio_input_enable(RAIN_GAUGE_GPIO);
-
-  // ulp_riscv_gpio_init(ANEMOMETER_GPIO);
-  // ulp_riscv_gpio_input_enable(ANEMOMETER_GPIO);
-
-  // ulp_riscv_timer_resume();
-
-  // halts and waits for next interrupt
-  // while (1) {
-  //   ulp_riscv_delay_cycles(DEBOUNCE_CYCLES);
-  //   ulp_riscv_halt();
-  // }
-  // ulp_error_flags++;
   return 0;
 }

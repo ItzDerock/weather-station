@@ -1,0 +1,12 @@
+#pragma once
+
+// If using hologram.io SIM, set to "hologram"
+// Other SIMs, refer to their documentation for APN settings
+constexpr const char *APN = "";
+
+// MQTT Configuration
+#define MQTT_BROKER_URL "MQTT IP or FQDN"
+#define MQTT_USERNAME "MQTT username for authentication"
+#define MQTT_CLIENT_ID "Unique client ID for the device"
+#define MQTT_CLIENT_PASSWORD "MQTT password for authentication"
+#define MQTT_PORT 8883 // Port for MQTT connection

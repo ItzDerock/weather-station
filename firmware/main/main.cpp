@@ -1,5 +1,8 @@
 #include <stdio.h>
 
+#define XPOWERS_CHIP_AXP2101
+
+#include "XPowersLib.h"
 #include "argentdata.h"
 #include "driver/i2c_master.h"
 #include "driver/i2c_types.h"
@@ -11,13 +14,11 @@
 #include "hal/i2c_types.h"
 #include "lps22.h"
 #include "ltr390uv.h"
+#include "modem.hpp"
 #include "shtc3.h"
 #include "sim7080g_driver_esp_idf.h"
 #include "soc/clk_tree_defs.h"
 #include "ulp_riscv.h"
-
-#define XPOWERS_CHIP_AXP2101
-#include "XPowersLib.h"
 
 static void setup_i2c(i2c_master_bus_handle_t *bus_handle,
                       i2c_master_bus_handle_t *bus_pmu_handle);
@@ -55,8 +56,8 @@ extern "C" void app_main(void) {
   setup_i2c(&bus_handle, &bus_pmu_handle);
 
   // initialize PMU chip
-  // XPowersPMU pmu;
-  // pmu.begin(bus_pmu_handle, AXP2101_SLAVE_ADDRESS);
+  XPowersPMU pmu;
+  pmu.begin(bus_pmu_handle, AXP2101_SLAVE_ADDRESS);
 
   // initialize each device
   i2c_master_dev_handle_t lps22_handle;
@@ -78,6 +79,10 @@ extern "C" void app_main(void) {
 
   struct ArgentSensorData argentData = {0, 0, 0};
   argentdata_reset_counts();
+
+  // start modem
+  sim7080g_handle_t sim7080g_handle;
+  modem_init(pmu, &sim7080g_handle);
 
   while (true) {
     // test argentdata
