@@ -27,12 +27,20 @@
 static const char *TAG = "modem";
 static const char *TAG_CONNECT = "modem:connect";
 
+// forward declarations
 static esp_err_t modem_basic_at_test(sim7080g_handle_t *handle,
                                      gpio_num_t pwr_key_pin, int test_retries,
                                      bool pwr_cycle_on_fail);
 
 static esp_err_t try_connect_network(sim7080g_handle_t *handle, int attempts,
                                      const char *apn);
+
+static esp_err_t wait_physical_layer(sim7080g_handle_t *&sim7080g_handle,
+                                     int attempts = 10);
+
+static esp_err_t modem_init_tls(sim7080g_handle_t *handle);
+
+static esp_err_t modem_init_gpio();
 
 void modem_init_power(XPowersAXP2101 &pmu) {
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
@@ -55,23 +63,7 @@ void modem_init_power(XPowersAXP2101 &pmu) {
 
 esp_err_t modem_init(XPowersAXP2101 &pmu, sim7080g_handle_t *sim7080g_handle) {
   modem_init_power(pmu);
-
-  // init gpios
-  ESP_RETURN_ON_ERROR(gpio_reset_pin(BOARD_MODEM_PWR_PIN), TAG,
-                      "Failed to reset pin %d", BOARD_MODEM_PWR_PIN);
-  ESP_RETURN_ON_ERROR(gpio_reset_pin(BOARD_MODEM_DTR_PIN), TAG,
-                      "Failed to reset pin %d", BOARD_MODEM_DTR_PIN);
-  ESP_RETURN_ON_ERROR(gpio_reset_pin(BOARD_MODEM_RI_PIN), TAG,
-                      "Failed to reset pin %d", BOARD_MODEM_RI_PIN);
-
-  ESP_RETURN_ON_ERROR(gpio_set_direction(BOARD_MODEM_PWR_PIN, GPIO_MODE_OUTPUT),
-                      TAG, "Failed to set pin %d as output",
-                      BOARD_MODEM_PWR_PIN);
-  ESP_RETURN_ON_ERROR(gpio_set_direction(BOARD_MODEM_DTR_PIN, GPIO_MODE_OUTPUT),
-                      TAG, "Failed to set pin %d as output",
-                      BOARD_MODEM_DTR_PIN);
-  ESP_RETURN_ON_ERROR(gpio_set_direction(BOARD_MODEM_RI_PIN, GPIO_MODE_INPUT),
-                      TAG, "Failed to set pin %d as input", BOARD_MODEM_RI_PIN);
+  modem_init_gpio();
 
   // Pull PWRKEY for 1 second to start modem
   ESP_RETURN_ON_ERROR(gpio_set_level(BOARD_MODEM_PWR_PIN, 0), TAG,
@@ -84,6 +76,7 @@ esp_err_t modem_init(XPowersAXP2101 &pmu, sim7080g_handle_t *sim7080g_handle) {
                       "Failed to set pin %d low", BOARD_MODEM_PWR_PIN);
 
   // Modem exists via UART
+  // so set up config
   sim7080g_uart_config_t uart_config = {.gpio_num_tx = BOARD_MODEM_TXD_PIN,
                                         .gpio_num_rx = BOARD_MODEM_RXD_PIN,
                                         .port_num = UART_NUM_1};
@@ -92,7 +85,11 @@ esp_err_t modem_init(XPowersAXP2101 &pmu, sim7080g_handle_t *sim7080g_handle) {
                                         .username = MQTT_USERNAME,
                                         .client_id = MQTT_CLIENT_ID,
                                         .client_password = MQTT_CLIENT_PASSWORD,
-                                        .port = MQTT_PORT};
+                                        .port = MQTT_PORT,
+                                        .use_tls = USE_MQTTS,
+                                        .ssl_context_index = 0,
+                                        .ca_cert_filename_on_modem =
+                                            "mqtts_ca.pem"};
 
   ESP_LOGI(TAG, "Configuring SIM7080G");
   ESP_RETURN_ON_ERROR(
@@ -108,6 +105,18 @@ esp_err_t modem_init(XPowersAXP2101 &pmu, sim7080g_handle_t *sim7080g_handle) {
   ESP_RETURN_ON_ERROR(sim7080g_init(sim7080g_handle), TAG,
                       "Failed to initialize modem handle");
 
+  // Set up SSL
+  ESP_LOGI(TAG, "Configuring TLS for MQTTS...");
+  esp_err_t tls_err = modem_init_tls(sim7080g_handle);
+  if (tls_err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to configure MQTTS SSL: %s",
+             esp_err_to_name(tls_err));
+
+    if (sim7080g_handle != nullptr)
+      sim7080g_handle->mqtt_config.use_tls = false; // Disable TLS if failed
+  }
+
+  // Attempt to connect to the network
   int network_connection_attempts = 5;
   esp_err_t network_connect_status =
       try_connect_network(sim7080g_handle, network_connection_attempts, APN);
@@ -118,7 +127,11 @@ esp_err_t modem_init(XPowersAXP2101 &pmu, sim7080g_handle_t *sim7080g_handle) {
     return network_connect_status;
   }
 
-  // COnfirm data link is up.
+  // confirm physical layer connection
+  ESP_RETURN_ON_ERROR(wait_physical_layer(sim7080g_handle), TAG,
+                      "Failed to confirm physical layer connection");
+
+  // confirm application layer connection
   bool is_data_link_connected = false;
   esp_err_t data_link_check = sim7080g_is_data_link_layer_connected(
       sim7080g_handle, &is_data_link_connected);
@@ -129,29 +142,7 @@ esp_err_t modem_init(XPowersAXP2101 &pmu, sim7080g_handle_t *sim7080g_handle) {
   }
   ESP_LOGI(TAG, "modem_init: Data link layer connected.");
 
-  // ESP_LOGI(TAG, "Connecting to network...");
-  // ESP_RETURN_ON_ERROR(sim7080g_connect_to_network_bearer(sim7080g_handle,
-  // APN),
-  //                     TAG, "Failed to connect to network");
-
-  bool connected = false;
-  do {
-    esp_err_t err =
-        sim7080g_is_physical_layer_connected(sim7080g_handle, &connected);
-    if (err != ESP_OK) {
-      ESP_LOGE(TAG, "Failed to check physical layer connection: %s",
-               esp_err_to_name(err));
-    }
-
-    if (connected) {
-      ESP_LOGI(TAG, "Physical layer connected");
-      break;
-    } else {
-      ESP_LOGI(TAG, "Waiting for physical layer connection...");
-      vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-  } while (!connected);
-
+  // connect to broker
   ESP_RETURN_ON_ERROR(sim7080g_mqtt_connect_to_broker(sim7080g_handle), TAG,
                       "Failed to connect to MQTT broker");
 
@@ -398,4 +389,69 @@ static esp_err_t try_connect_network(sim7080g_handle_t *handle,
            "Failed to connect to network bearer after %d attempts.",
            max_attempts);
   return result; // Return the error from the last attempt
+}
+
+/**
+ * @brief Waits for the physical layer to be connected.
+ */
+static esp_err_t wait_physical_layer(sim7080g_handle_t *&sim7080g_handle,
+                                     int attempts) {
+  bool connected = false;
+  int attempt = 0;
+  esp_err_t err = ESP_OK;
+
+  ESP_LOGI(TAG, "Waiting for physical layer connection...");
+
+  do {
+    err = sim7080g_is_physical_layer_connected(sim7080g_handle, &connected);
+
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to check physical layer connection: %s",
+               esp_err_to_name(err));
+    }
+
+    if (connected) {
+      ESP_LOGI(TAG, "Physical layer connected");
+      return ESP_OK;
+    } else {
+      ESP_LOGI(TAG, "Waiting for physical layer connection...");
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      attempt++;
+    }
+  } while (!connected && attempt < attempts);
+
+  return err == ESP_OK ? ESP_FAIL : err;
+}
+
+static esp_err_t modem_init_gpio() {
+  // init gpios
+  ESP_RETURN_ON_ERROR(gpio_reset_pin(BOARD_MODEM_PWR_PIN), TAG,
+                      "Failed to reset pin %d", BOARD_MODEM_PWR_PIN);
+  ESP_RETURN_ON_ERROR(gpio_reset_pin(BOARD_MODEM_DTR_PIN), TAG,
+                      "Failed to reset pin %d", BOARD_MODEM_DTR_PIN);
+  ESP_RETURN_ON_ERROR(gpio_reset_pin(BOARD_MODEM_RI_PIN), TAG,
+                      "Failed to reset pin %d", BOARD_MODEM_RI_PIN);
+
+  ESP_RETURN_ON_ERROR(gpio_set_direction(BOARD_MODEM_PWR_PIN, GPIO_MODE_OUTPUT),
+                      TAG, "Failed to set pin %d as output",
+                      BOARD_MODEM_PWR_PIN);
+  ESP_RETURN_ON_ERROR(gpio_set_direction(BOARD_MODEM_DTR_PIN, GPIO_MODE_OUTPUT),
+                      TAG, "Failed to set pin %d as output",
+                      BOARD_MODEM_DTR_PIN);
+  ESP_RETURN_ON_ERROR(gpio_set_direction(BOARD_MODEM_RI_PIN, GPIO_MODE_INPUT),
+                      TAG, "Failed to set pin %d as input", BOARD_MODEM_RI_PIN);
+
+  return ESP_OK;
+}
+
+static esp_err_t modem_init_tls(sim7080g_handle_t *handle) {
+#if USE_MQTTS
+  ESP_LOGI(TAG, "Configuring SSL for MQTTS...");
+  ESP_RETURN_ON_ERROR(sim7080g_mqtts_configure_ssl(handle, CA_PEM), TAG,
+                      "Failed to configure MQTTS SSL.");
+#else
+  ESP_LOGI(TAG, "MQTTS disabled. Using unencrypted MQTT.");
+#endif
+
+  return ESP_OK;
 }

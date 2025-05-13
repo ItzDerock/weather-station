@@ -12,9 +12,10 @@
 #include "freertos/idf_additions.h"
 #include "freertos/projdefs.h"
 #include "hal/i2c_types.h"
+#include "include/modem.hpp"
+#include "include/sensors.hpp"
 #include "lps22.h"
 #include "ltr390uv.h"
-#include "modem.hpp"
 #include "shtc3.h"
 #include "sim7080g_driver_esp_idf.h"
 #include "soc/clk_tree_defs.h"
@@ -82,7 +83,11 @@ extern "C" void app_main(void) {
 
   // start modem
   sim7080g_handle_t sim7080g_handle;
-  modem_init(pmu, &sim7080g_handle);
+  esp_err_t modem_err = modem_init(pmu, &sim7080g_handle);
+
+  // data
+  sensor_data_t sensor_data;
+  sensor_data.argent = &argentData;
 
   while (true) {
     // test argentdata
@@ -100,7 +105,10 @@ extern "C" void app_main(void) {
 
       ESP_LOGI(taskName, "Pressure: %.2f hPa", pressure_hpa);
       ESP_LOGI(taskName, "Temperature (LPS22): %.2f C", lps_temperature);
+
+      sensor_data.pressure = std::optional<float>(pressure_hpa);
     } else {
+      sensor_data.pressure = std::nullopt;
       ESP_LOGE(taskName, "Failed to initialize LPS22 sensor: %s",
                esp_err_to_name(lpsok));
     }
@@ -109,7 +117,14 @@ extern "C" void app_main(void) {
     // CSE = Clock Stretching Enabled
     // NM = Normal Mode (as opposed to low power mode)
     float temperature, humidity;
-    shtc3_get_th(shtc3_handle, SHTC3_REG_T_CSE_NM, &temperature, &humidity);
+    esp_err_t shtc3_err =
+        shtc3_get_th(shtc3_handle, SHTC3_REG_T_CSE_NM, &temperature, &humidity);
+
+    sensor_data.temperature =
+        shtc3_err == ESP_OK ? std::optional<float>(temperature) : std::nullopt;
+
+    sensor_data.humidity =
+        shtc3_err == ESP_OK ? std::optional<float>(humidity) : std::nullopt;
 
     ESP_LOGI(taskName, "Temperature: %.2f C", temperature);
     ESP_LOGI(taskName, "Humidity: %.2f %%", humidity);
@@ -120,11 +135,24 @@ extern "C" void app_main(void) {
     if (ltrerr != ESP_OK) {
       ESP_LOGE(taskName, "ltr390uv device read failed (%s)",
                esp_err_to_name(ltrerr));
+
+      sensor_data.uv_index = std::nullopt;
     } else {
       ESP_LOGI(taskName, "Ultraviolet index: %f", uvi);
+      sensor_data.uv_index = std::optional<float>(uvi);
     }
 
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    // publish to MQTT
+    esp_err_t mqtt_err = mqtt_send_data(&sim7080g_handle, sensor_data);
+
+    if (mqtt_err != ESP_OK) {
+      ESP_LOGE(taskName, "Failed to send data to MQTT: %s",
+               esp_err_to_name(mqtt_err));
+    } else {
+      ESP_LOGI(taskName, "Data sent to MQTT successfully");
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(30'000));
   }
 }
 
