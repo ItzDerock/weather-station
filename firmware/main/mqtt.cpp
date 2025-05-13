@@ -24,16 +24,18 @@ static cJSON *mqtt_build_payload(sensor_data_t &data, time_t &time) {
   }
 
   cJSON_AddNumberToObject(root, "wind_speed", data.argent->wind_speed);
-  cJSON_AddNumberToObject(root, "wind_speed_gust",
-                          data.argent->wind_speed_gust);
-  cJSON_AddNumberToObject(root, "rainfall", data.argent->rainfall);
+  cJSON_AddNumberToObject(root, "wind_gust", data.argent->wind_speed_gust);
 
-  CJSON_ADD_IF_OPTION_NOT_NULL(root, "temperature", data.temperature);
+  // TODO: send all degrees
+  cJSON_AddNumberToObject(root, "wind_dir", data.argent->degrees[0]);
+  cJSON_AddNumberToObject(root, "rain", data.argent->rainfall);
+
+  CJSON_ADD_IF_OPTION_NOT_NULL(root, "temp", data.temperature);
   CJSON_ADD_IF_OPTION_NOT_NULL(root, "humidity", data.humidity);
   CJSON_ADD_IF_OPTION_NOT_NULL(root, "pressure", data.pressure);
   CJSON_ADD_IF_OPTION_NOT_NULL(root, "uv_index", data.uv_index);
 
-  cJSON_AddNumberToObject(root, "timestamp", (double)time);
+  cJSON_AddNumberToObject(root, "dateTime", (double)time);
 
   return root;
 }
