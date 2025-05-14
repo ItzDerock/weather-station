@@ -1,5 +1,7 @@
 #include <stdio.h>
 
+#include <cstddef>
+
 #define XPOWERS_CHIP_AXP2101
 
 #include "XPowersLib.h"
@@ -89,71 +91,115 @@ extern "C" void app_main(void) {
   sensor_data_t sensor_data;
   sensor_data.argent = &argentData;
 
-  while (true) {
-    // test argentdata
-    argentdata_read_values(&argentData);
-    ESP_LOGI(taskName, "Wind speed: %f mph", argentData.wind_speed);
-    ESP_LOGI(taskName, "Wind speed (gust): %f mph", argentData.wind_speed_gust);
-    ESP_LOGI(taskName, "Rainfall: %f in/min", argentData.rainfall);
+  // while (true) {
+  // test argentdata
+  argentdata_read_values(&argentData);
+  ESP_LOGI(taskName, "Wind speed: %f mph", argentData.wind_speed);
+  ESP_LOGI(taskName, "Wind speed (gust): %f mph", argentData.wind_speed_gust);
+  ESP_LOGI(taskName, "Rainfall: %f in/min", argentData.rainfall);
 
-    // test lps22
-    if (lpsok == ESP_OK) {
-      float pressure_hpa = 0.0f;
-      float lps_temperature = 0.0f;
-      lps22_read_pressure(lps22_handle, &pressure_hpa);
-      lps22_read_temperature(lps22_handle, &lps_temperature);
+  // test lps22
+  if (lpsok == ESP_OK) {
+    float pressure_hpa = 0.0f;
+    float lps_temperature = 0.0f;
+    lps22_read_pressure(lps22_handle, &pressure_hpa);
+    lps22_read_temperature(lps22_handle, &lps_temperature);
 
-      ESP_LOGI(taskName, "Pressure: %.2f hPa", pressure_hpa);
-      ESP_LOGI(taskName, "Temperature (LPS22): %.2f C", lps_temperature);
+    ESP_LOGI(taskName, "Pressure: %.2f hPa", pressure_hpa);
+    ESP_LOGI(taskName, "Temperature (LPS22): %.2f C", lps_temperature);
 
-      sensor_data.pressure = std::optional<float>(pressure_hpa);
-    } else {
-      sensor_data.pressure = std::nullopt;
-      ESP_LOGE(taskName, "Failed to initialize LPS22 sensor: %s",
-               esp_err_to_name(lpsok));
-    }
-
-    // test shtc3
-    // CSE = Clock Stretching Enabled
-    // NM = Normal Mode (as opposed to low power mode)
-    float temperature, humidity;
-    esp_err_t shtc3_err =
-        shtc3_get_th(shtc3_handle, SHTC3_REG_T_CSE_NM, &temperature, &humidity);
-
-    sensor_data.temperature =
-        shtc3_err == ESP_OK ? std::optional<float>(temperature) : std::nullopt;
-
-    sensor_data.humidity =
-        shtc3_err == ESP_OK ? std::optional<float>(humidity) : std::nullopt;
-
-    ESP_LOGI(taskName, "Temperature: %.2f C", temperature);
-    ESP_LOGI(taskName, "Humidity: %.2f %%", humidity);
-
-    // test ltr390
-    float uvi;
-    esp_err_t ltrerr = ltr390uv_get_ultraviolet_index(dev_hdl, &uvi);
-    if (ltrerr != ESP_OK) {
-      ESP_LOGE(taskName, "ltr390uv device read failed (%s)",
-               esp_err_to_name(ltrerr));
-
-      sensor_data.uv_index = std::nullopt;
-    } else {
-      ESP_LOGI(taskName, "Ultraviolet index: %f", uvi);
-      sensor_data.uv_index = std::optional<float>(uvi);
-    }
-
-    // publish to MQTT
-    esp_err_t mqtt_err = mqtt_send_data(&sim7080g_handle, sensor_data);
-
-    if (mqtt_err != ESP_OK) {
-      ESP_LOGE(taskName, "Failed to send data to MQTT: %s",
-               esp_err_to_name(mqtt_err));
-    } else {
-      ESP_LOGI(taskName, "Data sent to MQTT successfully");
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(30'000));
+    sensor_data.pressure = std::optional<float>(pressure_hpa);
+  } else {
+    sensor_data.pressure = std::nullopt;
+    ESP_LOGE(taskName, "Failed to initialize LPS22 sensor: %s",
+             esp_err_to_name(lpsok));
   }
+
+  // test shtc3
+  // CSE = Clock Stretching Enabled
+  // NM = Normal Mode (as opposed to low power mode)
+  float temperature, humidity;
+  esp_err_t shtc3_err =
+      shtc3_get_th(shtc3_handle, SHTC3_REG_T_CSE_NM, &temperature, &humidity);
+
+  sensor_data.temperature =
+      shtc3_err == ESP_OK ? std::optional<float>(temperature) : std::nullopt;
+
+  sensor_data.humidity =
+      shtc3_err == ESP_OK ? std::optional<float>(humidity) : std::nullopt;
+
+  ESP_LOGI(taskName, "Temperature: %.2f C", temperature);
+  ESP_LOGI(taskName, "Humidity: %.2f %%", humidity);
+
+  // test ltr390
+  float uvi;
+  esp_err_t ltrerr = ltr390uv_get_ultraviolet_index(dev_hdl, &uvi);
+  if (ltrerr != ESP_OK) {
+    ESP_LOGE(taskName, "ltr390uv device read failed (%s)",
+             esp_err_to_name(ltrerr));
+
+    sensor_data.uv_index = std::nullopt;
+  } else {
+    ESP_LOGI(taskName, "Ultraviolet index: %f", uvi);
+    sensor_data.uv_index = std::optional<float>(uvi);
+  }
+
+  // read battery information
+  if (pmu.isBatteryConnect()) {
+    uint16_t voltage = pmu.getBattVoltage();
+    int percent = pmu.getBatteryPercent();
+
+    ESP_LOGI(taskName, "Battery voltage: %d mV", voltage);
+    ESP_LOGI(taskName, "Battery percent: %d %%", percent);
+
+    sensor_data.battery_voltage = std::optional<uint16_t>(voltage);
+    sensor_data.battery_est_percentage = std::optional<int>(percent);
+  } else {
+    ESP_LOGE(taskName, "Battery not connected");
+    sensor_data.battery_voltage = std::nullopt;
+    sensor_data.battery_est_percentage = std::nullopt;
+  }
+
+  // read cellular information
+  int8_t rssi = 0;
+  uint8_t ber = 0;
+
+  esp_err_t cellular_err =
+      sim7080g_check_signal_quality(&sim7080g_handle, &rssi, &ber);
+
+  if (cellular_err == ESP_OK) {
+    ESP_LOGI(taskName, "Signal quality: %d dBm", rssi);
+    ESP_LOGI(taskName, "Bit error rate: %d", ber);
+
+    sensor_data.rssi = std::optional<int8_t>(rssi);
+    sensor_data.ber = std::optional<uint8_t>(ber);
+  } else {
+    ESP_LOGE(taskName, "Failed to check signal quality: %s",
+             esp_err_to_name(cellular_err));
+
+    sensor_data.rssi = std::nullopt;
+    sensor_data.ber = std::nullopt;
+  }
+
+  // publish to MQTT
+  esp_err_t mqtt_err = mqtt_send_data(&sim7080g_handle, sensor_data);
+
+  if (mqtt_err != ESP_OK) {
+    ESP_LOGE(taskName, "Failed to send data to MQTT: %s",
+             esp_err_to_name(mqtt_err));
+  } else {
+    ESP_LOGI(taskName, "Data sent to MQTT successfully");
+  }
+
+  ESP_LOGI(taskName, "Entering deep sleep...");
+
+  // Deep sleep for 10 minutes
+  // Hard coded. If changed, update the ULP config.h's `REPORT_PERIOD`
+  modem_power_off(pmu);
+  esp_sleep_enable_timer_wakeup(static_cast<long long>(1 * 60) * 1000000);
+  esp_deep_sleep_start();
+
+  // }
 }
 
 static void setup_i2c(i2c_master_bus_handle_t *bus_handle,

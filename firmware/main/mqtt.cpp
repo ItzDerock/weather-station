@@ -34,6 +34,11 @@ static cJSON *mqtt_build_payload(sensor_data_t &data, time_t &time) {
   CJSON_ADD_IF_OPTION_NOT_NULL(root, "humidity", data.humidity);
   CJSON_ADD_IF_OPTION_NOT_NULL(root, "pressure", data.pressure);
   CJSON_ADD_IF_OPTION_NOT_NULL(root, "uv_index", data.uv_index);
+  CJSON_ADD_IF_OPTION_NOT_NULL(root, "battery_voltage", data.battery_voltage);
+  CJSON_ADD_IF_OPTION_NOT_NULL(root, "battery_percent",
+                               data.battery_est_percentage);
+  CJSON_ADD_IF_OPTION_NOT_NULL(root, "rssi", data.rssi);
+  CJSON_ADD_IF_OPTION_NOT_NULL(root, "ber", data.ber);
 
   cJSON_AddNumberToObject(root, "dateTime", (double)time);
 
