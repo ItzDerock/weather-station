@@ -196,7 +196,7 @@ extern "C" void app_main(void) {
   // Deep sleep for 10 minutes
   // Hard coded. If changed, update the ULP config.h's `REPORT_PERIOD`
   modem_power_off(pmu);
-  esp_sleep_enable_timer_wakeup(static_cast<long long>(1 * 60) * 1000000);
+  esp_sleep_enable_timer_wakeup(static_cast<long long>(10 * 60) * 1000000);
   esp_deep_sleep_start();
 
   // }
