@@ -64,6 +64,10 @@ extern "C" void app_main(void) {
   XPowersPMU pmu;
   pmu.begin(bus_pmu_handle, AXP2101_SLAVE_ADDRESS);
 
+  // power on the sensors
+  pmu.setDC5Voltage(3'300);
+  pmu.enableDC5();
+
   // initialize each device
   i2c_master_dev_handle_t lps22_handle;
   esp_err_t lpsok = lps22_init(bus_handle, &lps22_handle, LPS22_DEFAULT_ADDR);
@@ -234,7 +238,9 @@ extern "C" void app_main(void) {
   // Deep sleep for 10 minutes
   // Hard coded. If changed, update the ULP config.h's `REPORT_PERIOD`
   modem_power_off(pmu);
+  pmu.disableDC5();
   esp_sleep_enable_timer_wakeup(static_cast<long long>(10 * 60) * 1000000);
+  vTaskDelay(pdMS_TO_TICKS(1'000));
   esp_deep_sleep_start();
 
   // }
