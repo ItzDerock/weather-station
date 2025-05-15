@@ -23,6 +23,8 @@
 #include "soc/clk_tree_defs.h"
 #include "ulp_riscv.h"
 
+#include "config.h"
+
 static void setup_i2c(i2c_master_bus_handle_t *bus_handle,
                       i2c_master_bus_handle_t *bus_pmu_handle);
 
@@ -100,15 +102,31 @@ extern "C" void app_main(void) {
 
   // test lps22
   if (lpsok == ESP_OK) {
-    float pressure_hpa = 0.0f;
-    float lps_temperature = 0.0f;
+    float pressure_hpa, lps_temperature;
+
     lps22_read_pressure(lps22_handle, &pressure_hpa);
+    // Not actually used because of ±1.5 std.err.
     lps22_read_temperature(lps22_handle, &lps_temperature);
 
+#if USE_IMPERIAL
+    float pressure_inhg = pressure_hpa * 0.02953f;
+    // Not actually used
+    float lps_temperature_f = lps_temperature * 9.0f / 5.0f + 32.0f;
+    ESP_LOGI(taskName, "Pressure: %.2f inHg", pressure_inhg);
+    ESP_LOGI(taskName, "Temperature (LPS22): %.2f °F", lps_temperature_f);
+
+    sensor_data.pressure = std::optional<float>(pressure_inhg);
+#if LOG_METRIC
     ESP_LOGI(taskName, "Pressure: %.2f hPa", pressure_hpa);
-    ESP_LOGI(taskName, "Temperature (LPS22): %.2f C", lps_temperature);
+    ESP_LOGI(taskName, "Pressure: %.2f hPa", lps_temperature);
+#endif
+#else
+    ESP_LOGI(taskName, "Pressure: %.2f hPa", pressure_hpa);
+    // Not actually used
+    ESP_LOGI(taskName, "Temperature (LPS22): %.2f °C", lps_temperature);
 
     sensor_data.pressure = std::optional<float>(pressure_hpa);
+#endif
   } else {
     sensor_data.pressure = std::nullopt;
     ESP_LOGE(taskName, "Failed to initialize LPS22 sensor: %s",
@@ -121,15 +139,35 @@ extern "C" void app_main(void) {
   float temperature, humidity;
   esp_err_t shtc3_err =
       shtc3_get_th(shtc3_handle, SHTC3_REG_T_CSE_NM, &temperature, &humidity);
+  if (shtc3_err == ESP_OK) {
+    // ESP_LOGI(taskName, "ARE WE USING IMPERIAL: %d", USE_IMPERIAL)
+#if USE_IMPERIAL
+    float temperature_f = temperature * 9.0f / 5.0f + 32.0f;
 
-  sensor_data.temperature =
+    sensor_data.temperature =
+      shtc3_err == ESP_OK ? std::optional<float>(temperature_f) : std::nullopt;
+
+    ESP_LOGI(taskName, "Temperature: %.2f F", temperature_f);
+#if LOG_METRIC
+    ESP_LOGI(taskName, "Temperature: %.2f C", temperature);
+#endif
+#else
+    sensor_data.temperature =
       shtc3_err == ESP_OK ? std::optional<float>(temperature) : std::nullopt;
 
-  sensor_data.humidity =
+    ESP_LOGI(taskName, "Temperature: %.2f C", temperature);
+#endif
+    sensor_data.humidity =
       shtc3_err == ESP_OK ? std::optional<float>(humidity) : std::nullopt;
 
-  ESP_LOGI(taskName, "Temperature: %.2f C", temperature);
-  ESP_LOGI(taskName, "Humidity: %.2f %%", humidity);
+    ESP_LOGI(taskName, "Humidity: %.2f %%", humidity);
+  } else {
+    sensor_data.temperature = std::nullopt;
+    sensor_data.humidity = std::nullopt;
+
+    ESP_LOGE(taskName, "Failed to initialize shtc3 sensor: %s",
+             esp_err_to_name(lpsok));
+  }
 
   // test ltr390
   float uvi;

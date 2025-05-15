@@ -4,6 +4,10 @@
 // Other SIMs, refer to their documentation for APN settings
 constexpr const char *APN = "";
 
+// Unit Configuration
+#define USE_IMPERIAL true
+#define LOG_METRIC false
+
 // MQTT Configuration
 #define MQTT_BROKER_URL "MQTT IP or FQDN"
 #define MQTT_USERNAME "MQTT username for authentication"
