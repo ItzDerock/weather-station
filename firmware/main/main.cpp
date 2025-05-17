@@ -32,10 +32,6 @@ extern "C" void app_main(void) {
   char *taskName = pcTaskGetName(nullptr);
   ESP_LOGI(taskName, "StationFirmware starting.");
 
-  // Wait 1 second to allow for USB serial connection
-  // so chip doesnt sleep before we can see the log
-  vTaskDelay(pdMS_TO_TICKS(1000));
-
   // figure the wakeup cause
   esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
 
@@ -143,13 +139,15 @@ extern "C" void app_main(void) {
   float temperature, humidity;
   esp_err_t shtc3_err =
       shtc3_get_th(shtc3_handle, SHTC3_REG_T_CSE_NM, &temperature, &humidity);
+
   if (shtc3_err == ESP_OK) {
     // ESP_LOGI(taskName, "ARE WE USING IMPERIAL: %d", USE_IMPERIAL)
 #if USE_IMPERIAL
     float temperature_f = temperature * 9.0f / 5.0f + 32.0f;
 
-    sensor_data.temperature =
-      shtc3_err == ESP_OK ? std::optional<float>(temperature_f) : std::nullopt;
+    sensor_data.temperature = shtc3_err == ESP_OK
+                                  ? std::optional<float>(temperature_f)
+                                  : std::nullopt;
 
     ESP_LOGI(taskName, "Temperature: %.2f F", temperature_f);
 #if LOG_METRIC
@@ -157,12 +155,14 @@ extern "C" void app_main(void) {
 #endif
 #else
     sensor_data.temperature =
-      shtc3_err == ESP_OK ? std::optional<float>(temperature) : std::nullopt;
+        shtc3_err == ESP_OK ? std::optional<float>(temperature) : std::nullopt;
 
     ESP_LOGI(taskName, "Temperature: %.2f C", temperature);
 #endif
+
+    // humidity is in %RH
     sensor_data.humidity =
-      shtc3_err == ESP_OK ? std::optional<float>(humidity) : std::nullopt;
+        shtc3_err == ESP_OK ? std::optional<float>(humidity) : std::nullopt;
 
     ESP_LOGI(taskName, "Humidity: %.2f %%", humidity);
   } else {
@@ -173,9 +173,11 @@ extern "C" void app_main(void) {
              esp_err_to_name(lpsok));
   }
 
-  // test ltr390
+  // LTR390
+  // UV Index
   float uvi;
   esp_err_t ltrerr = ltr390uv_get_ultraviolet_index(dev_hdl, &uvi);
+
   if (ltrerr != ESP_OK) {
     ESP_LOGE(taskName, "ltr390uv device read failed (%s)",
              esp_err_to_name(ltrerr));
@@ -184,6 +186,20 @@ extern "C" void app_main(void) {
   } else {
     ESP_LOGI(taskName, "Ultraviolet index: %f", uvi);
     sensor_data.uv_index = std::optional<float>(uvi);
+  }
+
+  // Ambient Light
+  float ambient_light;
+  ltrerr = ltr390uv_get_ambient_light(dev_hdl, &ambient_light);
+
+  if (ltrerr != ESP_OK) {
+    ESP_LOGE(taskName, "ltr390uv device read failed (%s)",
+             esp_err_to_name(ltrerr));
+
+    sensor_data.ambient_light = std::nullopt;
+  } else {
+    ESP_LOGI(taskName, "Ambient light: %f", ambient_light);
+    sensor_data.ambient_light = std::optional<float>(ambient_light);
   }
 
   // read battery information
