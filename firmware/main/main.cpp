@@ -1,6 +1,9 @@
 #include <stdio.h>
 
+#include <atomic>
 #include <cstddef>
+#include <mutex>
+#include <optional>
 
 #define XPOWERS_CHIP_AXP2101
 
@@ -25,30 +28,38 @@
 
 #include "config.h"
 
+// sensor handles
+XPowersPMU pmu;
+i2c_master_dev_handle_t lps22_handle;
+i2c_master_dev_handle_t shtc3_handle;
+ltr390uv_handle_t dev_hdl;
+
+// sensor data
+sensor_data_t sensor_data = {};
+std::mutex sensor_data_mutex;
+
+// modem status
+std::atomic<bool> modem_is_connected{false};
+
 static void setup_i2c(i2c_master_bus_handle_t *bus_handle,
                       i2c_master_bus_handle_t *bus_pmu_handle);
+
+static void background_data_collection_task(void *args);
 
 extern "C" void app_main(void) {
   char *taskName = pcTaskGetName(nullptr);
   ESP_LOGI(taskName, "StationFirmware starting.");
 
-  // figure the wakeup cause
+  // Reload the ULP firmware.
   esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+  ESP_LOGI(taskName, "Wakeup cause: %d", cause);
 
-  switch (cause) {
-  case ESP_SLEEP_WAKEUP_ULP:
-    ESP_LOGI(taskName, "Wakeup reason: ULP");
-    break;
-
-  default:
-    ESP_LOGI(taskName, "Wakeup reason: %d", cause);
-
-    // load the ULP firmware
+  // if woken by timer from deep sleep, or by ULP, skip restarting the ULP
+  // we can assume the ULP is already running
+  if (cause != ESP_SLEEP_WAKEUP_ULP && cause != ESP_SLEEP_WAKEUP_TIMER) {
     ulp_riscv_reset();
     argentdata_init_gpio();
     argentdata_init_ulp();
-
-    break;
   }
 
   // initialize i2c
@@ -57,7 +68,6 @@ extern "C" void app_main(void) {
   setup_i2c(&bus_handle, &bus_pmu_handle);
 
   // initialize PMU chip
-  XPowersPMU pmu;
   pmu.begin(bus_pmu_handle, AXP2101_SLAVE_ADDRESS);
 
   // power on the sensors
@@ -65,37 +75,34 @@ extern "C" void app_main(void) {
   pmu.enableDC5();
 
   // initialize each device
-  i2c_master_dev_handle_t lps22_handle;
   esp_err_t lpsok = lps22_init(bus_handle, &lps22_handle, LPS22_DEFAULT_ADDR);
 
-  // TODO: gracefully handle failure
-  i2c_master_dev_handle_t shtc3_handle = shtc3_device_create(
-      bus_handle, SHTC3_I2C_ADDR, CONFIG_SHTC3_I2C_CLK_SPEED_HZ);
+  shtc3_handle = shtc3_device_create(bus_handle, SHTC3_I2C_ADDR,
+                                     CONFIG_SHTC3_I2C_CLK_SPEED_HZ);
 
-  // initialize ltr390
   ltr390uv_config_t dev_cfg = I2C_LTR390UV_CONFIG_DEFAULT;
-  ltr390uv_handle_t dev_hdl;
-
   ltr390uv_init(bus_handle, &dev_cfg, &dev_hdl);
-  if (dev_hdl == NULL) {
+  if (dev_hdl == NULL)
     ESP_LOGE(taskName, "ltr390uv handle init failed");
-    assert(dev_hdl);
-  }
 
-  struct ArgentSensorData argentData = {0, 0, 0};
-  argentdata_reset_counts();
+  // start background task as modem connects
+  xTaskCreate(background_data_collection_task,
+              "background_data_collection_task", 4096, nullptr, 5, nullptr);
 
   // start modem
   sim7080g_handle_t sim7080g_handle;
   esp_err_t modem_err = modem_init(pmu, &sim7080g_handle);
+  modem_is_connected.store(true);
 
-  // data
-  sensor_data_t sensor_data;
+  // -- READ SENSORS
+  sensor_data_mutex.lock();
+
+  // argentdata (Wind speed, gust, direction, rainfall)
+  struct ArgentSensorData argentData = {0, 0, 0};
+  argentdata_reset_counts();
+  argentdata_read_values(&argentData);
   sensor_data.argent = &argentData;
 
-  // while (true) {
-  // test argentdata
-  argentdata_read_values(&argentData);
   ESP_LOGI(taskName, "Wind speed: %f mph", argentData.wind_speed);
   ESP_LOGI(taskName, "Wind speed (gust): %f mph", argentData.wind_speed_gust);
   ESP_LOGI(taskName, "Rainfall: %f in/min", argentData.rainfall);
@@ -136,70 +143,49 @@ extern "C" void app_main(void) {
   // test shtc3
   // CSE = Clock Stretching Enabled
   // NM = Normal Mode (as opposed to low power mode)
-  float temperature, humidity;
-  esp_err_t shtc3_err =
-      shtc3_get_th(shtc3_handle, SHTC3_REG_T_CSE_NM, &temperature, &humidity);
+  if (shtc3_handle != nullptr) {
+    float temperature, humidity;
+    esp_err_t shtc3_err =
+        shtc3_get_th(shtc3_handle, SHTC3_REG_T_CSE_NM, &temperature, &humidity);
 
-  if (shtc3_err == ESP_OK) {
-    // ESP_LOGI(taskName, "ARE WE USING IMPERIAL: %d", USE_IMPERIAL)
+    if (shtc3_err == ESP_OK) {
 #if USE_IMPERIAL
-    float temperature_f = temperature * 9.0f / 5.0f + 32.0f;
+      float temperature_f = temperature * 9.0f / 5.0f + 32.0f;
 
-    sensor_data.temperature = shtc3_err == ESP_OK
-                                  ? std::optional<float>(temperature_f)
-                                  : std::nullopt;
+      sensor_data.temperature = shtc3_err == ESP_OK
+                                    ? std::optional<float>(temperature_f)
+                                    : std::nullopt;
 
-    ESP_LOGI(taskName, "Temperature: %.2f F", temperature_f);
+      ESP_LOGI(taskName, "Temperature: %.2f F", temperature_f);
 #if LOG_METRIC
-    ESP_LOGI(taskName, "Temperature: %.2f C", temperature);
+      ESP_LOGI(taskName, "Temperature: %.2f C", temperature);
 #endif
 #else
-    sensor_data.temperature =
-        shtc3_err == ESP_OK ? std::optional<float>(temperature) : std::nullopt;
+      sensor_data.temperature = shtc3_err == ESP_OK
+                                    ? std::optional<float>(temperature)
+                                    : std::nullopt;
 
-    ESP_LOGI(taskName, "Temperature: %.2f C", temperature);
+      ESP_LOGI(taskName, "Temperature: %.2f C", temperature);
 #endif
 
-    // humidity is in %RH
-    sensor_data.humidity =
-        shtc3_err == ESP_OK ? std::optional<float>(humidity) : std::nullopt;
+      // humidity is in %RH
+      sensor_data.humidity =
+          shtc3_err == ESP_OK ? std::optional<float>(humidity) : std::nullopt;
 
-    ESP_LOGI(taskName, "Humidity: %.2f %%", humidity);
+      ESP_LOGI(taskName, "Humidity: %.2f %%", humidity);
+    } else {
+      sensor_data.temperature = std::nullopt;
+      sensor_data.humidity = std::nullopt;
+
+      ESP_LOGE(taskName, "Failed to initialize shtc3 sensor: %s",
+               esp_err_to_name(lpsok));
+    }
   } else {
     sensor_data.temperature = std::nullopt;
     sensor_data.humidity = std::nullopt;
 
     ESP_LOGE(taskName, "Failed to initialize shtc3 sensor: %s",
              esp_err_to_name(lpsok));
-  }
-
-  // LTR390
-  // UV Index
-  float uvi;
-  esp_err_t ltrerr = ltr390uv_get_ultraviolet_index(dev_hdl, &uvi);
-
-  if (ltrerr != ESP_OK) {
-    ESP_LOGE(taskName, "ltr390uv device read failed (%s)",
-             esp_err_to_name(ltrerr));
-
-    sensor_data.uv_index = std::nullopt;
-  } else {
-    ESP_LOGI(taskName, "Ultraviolet index: %f", uvi);
-    sensor_data.uv_index = std::optional<float>(uvi);
-  }
-
-  // Ambient Light
-  float ambient_light;
-  ltrerr = ltr390uv_get_ambient_light(dev_hdl, &ambient_light);
-
-  if (ltrerr != ESP_OK) {
-    ESP_LOGE(taskName, "ltr390uv device read failed (%s)",
-             esp_err_to_name(ltrerr));
-
-    sensor_data.ambient_light = std::nullopt;
-  } else {
-    ESP_LOGI(taskName, "Ambient light: %f", ambient_light);
-    sensor_data.ambient_light = std::optional<float>(ambient_light);
   }
 
   // read battery information
@@ -253,13 +239,12 @@ extern "C" void app_main(void) {
 
   // Deep sleep for 10 minutes
   // Hard coded. If changed, update the ULP config.h's `REPORT_PERIOD`
+  sensor_data_mutex.unlock();
   modem_power_off(pmu);
   pmu.disableDC5();
   esp_sleep_enable_timer_wakeup(static_cast<long long>(10 * 60) * 1000000);
   vTaskDelay(pdMS_TO_TICKS(1'000));
   esp_deep_sleep_start();
-
-  // }
 }
 
 static void setup_i2c(i2c_master_bus_handle_t *bus_handle,
@@ -289,4 +274,73 @@ static void setup_i2c(i2c_master_bus_handle_t *bus_handle,
       .flags = {.enable_internal_pullup = true, .allow_pd = false}};
 
   ESP_ERROR_CHECK(i2c_new_master_bus(&pmu_bus_config, bus_pmu_handle));
+}
+
+/**
+ * Statistics like ambient light and UV index can fluctuate in short time
+ * periods for example, a cloud passing by. To avoid sending outliers, average
+ * the values while the modem is connecting.
+ */
+static void background_data_collection_task(void *args) {
+  static const char *taskName = "background_data_collection_task";
+
+  float uvi_sum = 0, ambient_light_sum = 0;
+  int uvi_count = 0, ambient_light_count = 0;
+
+  while (!modem_is_connected.load()) {
+    if (dev_hdl != nullptr) {
+      // UV Index
+      float uvi;
+      esp_err_t ltrerr = ltr390uv_get_ultraviolet_index(dev_hdl, &uvi);
+
+      if (ltrerr == ESP_OK) {
+        ESP_LOGI(taskName, "Ultraviolet index: %f", uvi);
+
+        uvi_sum += uvi;
+        uvi_count++;
+      } else {
+        ESP_LOGE(taskName, "ltr390uv device read failed (%s)",
+                 esp_err_to_name(ltrerr));
+      }
+
+      // Ambient Light
+      float ambient_light;
+      ltrerr = ltr390uv_get_ambient_light(dev_hdl, &ambient_light);
+
+      if (ltrerr == ESP_OK) {
+        ESP_LOGI(taskName, "Ambient light: %f", ambient_light);
+
+        ambient_light_sum += ambient_light;
+        ambient_light_count++;
+      } else {
+        ESP_LOGE(taskName, "ltr390uv device read failed (%s)",
+                 esp_err_to_name(ltrerr));
+      }
+    } else {
+      ESP_LOGE(taskName, "ltr390uv device handle is null");
+    }
+
+    // update the sensor data struct
+    sensor_data_mutex.lock();
+
+    if (uvi_count > 0) {
+      sensor_data.uv_index = std::optional<float>(uvi_sum / uvi_count);
+    } else {
+      sensor_data.uv_index = std::nullopt;
+    }
+
+    if (ambient_light_count > 0) {
+      sensor_data.ambient_light =
+          std::optional<float>(ambient_light_sum / ambient_light_count);
+    } else {
+      sensor_data.ambient_light = std::nullopt;
+    }
+
+    sensor_data_mutex.unlock();
+
+    vTaskDelay(pdMS_TO_TICKS(1'000));
+  }
+
+  // Clean up
+  vTaskDelete(nullptr);
 }
