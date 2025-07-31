@@ -286,6 +286,7 @@ static void background_data_collection_task(void *args) {
 
   float uvi_sum = 0, ambient_light_sum = 0;
   int uvi_count = 0, ambient_light_count = 0;
+  int error_log_count = 0;
 
   while (!modem_is_connected.load()) {
     if (dev_hdl != nullptr) {
@@ -316,8 +317,9 @@ static void background_data_collection_task(void *args) {
         ESP_LOGE(taskName, "ltr390uv device read failed (%s)",
                  esp_err_to_name(ltrerr));
       }
-    } else {
+    } else if (error_log_count < 5) {
       ESP_LOGE(taskName, "ltr390uv device handle is null");
+      error_log_count++;
     }
 
     // update the sensor data struct
