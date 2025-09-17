@@ -1,4 +1,5 @@
 #include "argentdata.h"
+#include "complex.h"
 #include "driver/rtc_io.h"
 #include "esp_attr.h"
 #include "esp_err.h"
@@ -6,7 +7,10 @@
 #include "esp_sleep.h"
 #include "esp_timer.h"
 #include "hal/adc_types.h"
+#include "hal/gpio_types.h"
+#include "portmacro.h"
 #include "soc/rtc_io_reg.h"
+#include "soc/rtc_io_struct.h"
 #include "soc/soc.h"
 #include "ulp/config.h"
 #include "ulp_adc.h"
@@ -38,6 +42,8 @@ static struct DirectionLookup lookupTable[] = {
     {120000, 270.0f}, {42120, 292.5f}, {64900, 315.0f}, {21880, 337.5f}};
 
 static const int lookupTableSize = sizeof(lookupTable) / sizeof(lookupTable[0]);
+
+extern portMUX_TYPE rtc_spinlock;
 
 /**
  * @brief Converts a raw ADC reading from the wind vane voltage divider
@@ -114,11 +120,19 @@ RTC_DATA_ATTR uint32_t argentdata_sensors_last_reset = 0;
 void argentdata_init_gpio(void) {
   ESP_LOGI("argent", "Configuring GPIOs for ULP wakeup via registers...");
 
-  gpio_num_t pins[] = {ANEMOMETER_GPIO, RAIN_GAUGE_GPIO};
+  const gpio_num_t pins[] = {ANEMOMETER_GPIO, RAIN_GAUGE_GPIO};
 
   for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); ++i) {
     gpio_num_t pin = pins[i];
     ESP_LOGI("argent", "Configuring GPIO %d...", pin);
+
+    // Configure on main cpu as well
+    gpio_config_t io_conf = {
+        .pin_bit_mask = BIT64(pin),
+        .mode = GPIO_MODE_INPUT,
+    };
+
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
 
     // Initialize RTC IO basic properties
     rtc_gpio_init(pin);
@@ -142,9 +156,17 @@ void argentdata_init_gpio(void) {
     // RTC_GPIO_PINn_INT_TYPE GPIO interrupt type selection. 0: GPIO interrupt
     // disabled; 1: rising edge trigger; 2: falling edge trigger; 3: any edge
     // trigger; 4: low level trigger; 5: high level trigger. (R/W)
-    uint32_t reg_addr = RTC_GPIO_PIN0_REG + (rtc_io_idx * sizeof(uint32_t));
-    REG_SET_BIT(reg_addr, RTC_GPIO_PIN0_WAKEUP_ENABLE_M);
-    REG_SET_FIELD(reg_addr, RTC_GPIO_PIN0_INT_TYPE, ULP_GPIO_WAKEUP_INT_TYPE);
+    // uint32_t reg_addr = RTC_GPIO_PIN0_REG + (rtc_io_idx * sizeof(uint32_t));
+    // REG_SET_BIT(reg_addr, RTC_GPIO_PIN0_WAKEUP_ENABLE_M);
+    // REG_SET_FIELD(reg_addr, RTC_GPIO_PIN0_INT_TYPE,
+    // ULP_GPIO_WAKEUP_INT_TYPE);
+    //
+    // portENTER_CRITICAL(&rtc_spinlock);
+    // RTCIO.pin[rtc_io_idx].wakeup_enable = 1;
+    // RTCIO.pin[rtc_io_idx].int_type = ULP_GPIO_WAKEUP_INT_TYPE;
+    // portEXIT_CRITICAL(&rtc_spinlock);
+    //
+    rtc_gpio_wakeup_enable(pin, GPIO_INTR_ANYEDGE);
 
     ESP_LOGI("argent",
              "GPIO %d (RTC IO %d) configured for ULP wakeup (Type: %d)", pin,
@@ -158,6 +180,7 @@ void argentdata_init_gpio(void) {
   }
 
   // RTC Peripheral power domain needs to be on to keep SAR ADC config
+  // and to detect changes on GPIO state
   esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
 
   // set up the ADC for wind vane
@@ -182,8 +205,12 @@ void argentdata_init_ulp(void) {
   // Wake the ULP every 3 seconds
   ESP_ERROR_CHECK(ulp_set_wakeup_period(0, ULP_WAKEUP_PERIOD));
 
+  ulp_riscv_cfg_t cfg = {
+      .wakeup_source = ULP_RISCV_WAKEUP_SOURCE_TIMER,
+  };
+
   // Start the program
-  err = ulp_riscv_run();
+  err = ulp_riscv_config_and_run(&cfg);
   ESP_ERROR_CHECK(err);
   ESP_LOGI("argent", "ULP program started.");
 }

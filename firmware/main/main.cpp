@@ -57,6 +57,7 @@ extern "C" void app_main(void) {
   // if woken by timer from deep sleep, or by ULP, skip restarting the ULP
   // we can assume the ULP is already running
   if (cause != ESP_SLEEP_WAKEUP_ULP && cause != ESP_SLEEP_WAKEUP_TIMER) {
+    ESP_LOGI(taskName, "Initializing ULP firmware.");
     ulp_riscv_reset();
     argentdata_init_gpio();
     argentdata_init_ulp();
@@ -85,6 +86,23 @@ extern "C" void app_main(void) {
   if (dev_hdl == NULL)
     ESP_LOGE(taskName, "ltr390uv handle init failed");
 
+  /******/
+  // DEBUG MODE
+  // TODO: Remove
+  // ArgentSensorData debugData = {0, 0, 0};
+  // while (true) {
+  //   // read argent and log the datapoints
+  //   argentdata_read_values(&debugData);
+  //   ESP_LOGI(taskName, "Wind speed: %f mph", debugData.wind_speed);
+  //   ESP_LOGI(taskName, "Wind speed (gust): %f mph",
+  //   debugData.wind_speed_gust); ESP_LOGI(taskName, "Rainfall: %f in/min",
+  //   debugData.rainfall); ESP_LOGI(taskName, "Wind direction: %f degrees",
+  //   debugData.degrees[0]);
+
+  //   vTaskDelay(pdMS_TO_TICKS(2'500));
+  // }
+  /*******/
+
   // start background task as modem connects
   xTaskCreate(background_data_collection_task,
               "background_data_collection_task", 4096, nullptr, 5, nullptr);
@@ -99,8 +117,8 @@ extern "C" void app_main(void) {
 
   // argentdata (Wind speed, gust, direction, rainfall)
   struct ArgentSensorData argentData = {0, 0, 0};
-  argentdata_reset_counts();
   argentdata_read_values(&argentData);
+  argentdata_reset_counts();
   sensor_data.argent = &argentData;
 
   ESP_LOGI(taskName, "Wind speed: %f mph", argentData.wind_speed);

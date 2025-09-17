@@ -2,7 +2,8 @@
 #include "../ulp/config.h"
 
 // Configuration
-#define ULP_WAKEUP_PERIOD 3000000
+// Wake up the ULP every 3 seconds
+#define ULP_WAKEUP_PERIOD 3000000 // microseconds
 
 // From datasheet:
 // > A wind speed of 1.492 MPH (2.4 km/h) causes the switch to close once per

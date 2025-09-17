@@ -1,7 +1,7 @@
 # Set usual component variables
 set(COMPONENT_SRCS "argentdata.c")
 set(COMPONENT_ADD_INCLUDEDIRS "include")
-set(COMPONENT_REQUIRES ulp driver esp_timer)
+set(COMPONENT_REQUIRES ulp driver esp_timer esp_adc)
 
 register_component()
 

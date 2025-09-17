@@ -9,12 +9,14 @@
 #include "config.h"
 #include "esp_attr.h"
 #include "hal/adc_types.h"
+#include "soc/gpio_num.h"
 #include "soc/rtc_io_reg.h"
 #include "soc/soc.h"
 #include "ulp_riscv.h"
 #include "ulp_riscv_adc_ulp_core.h"
 #include "ulp_riscv_gpio.h"
 #include "ulp_riscv_utils.h"
+#include "ulp_vars.h"
 #include <stdint.h>
 
 // There's no hardware debouncing, so must do this ourselves
@@ -48,7 +50,7 @@ RTC_DATA_ATTR uint8_t wind_direction_index = 0;
 RTC_DATA_ATTR uint8_t wakeup_index = 0;
 
 // Debug flags (0 = ok)
-RTC_DATA_ATTR int8_t error_flags = 0;
+RTC_DATA_ATTR int32_t error_flags = 0;
 #define ULP_ERR_FLAG_ILLEGAL_INSN (1 << 1)
 #define ULP_ERR_FLAG_BUS_ERROR (1 << 2)
 #define ULP_ERR_FLAG_UNKNOWN_IRQ (1 << 3)
@@ -66,15 +68,19 @@ RTC_DATA_ATTR int8_t error_flags = 0;
 static void anemometer_isr() {
   anem_ticks_current_second++; // Count for the current 1-sec interval
   anem_ticks_total++;          // Accumulate total count
+  error_flags++;
 }
 
-static void rain_gauge_isr() { rain_gauge_count++; }
+static void rain_gauge_isr() {
+  rain_gauge_count++;
+  error_flags++;
+}
 
 static void read_direction() {
-  error_flags = 2;
+  error_flags = 67;
   int32_t result =
       ulp_riscv_adc_read_channel(WIND_VANE_ADC_UNIT, WIND_VANE_ADC_CHANNEL);
-  error_flags = 3;
+  error_flags = 69;
 
   wind_direction[wind_direction_index] = result;
   wind_direction_index = (wind_direction_index + 1) % WIND_VANE_KEEP_N;
@@ -109,10 +115,11 @@ static void ulp_timer_isr() {
   // Every nth wakeup period, measure wind direction
   if (wakeup_index == 0) {
     read_direction();
-    error_flags = 4;
   }
 
   wakeup_index = (wakeup_index + 1) % WIND_VANE_MEASUREMENT_INTERVAL;
+
+  error_flags++;
 }
 
 /**
@@ -123,12 +130,14 @@ static void ulp_timer_isr() {
  * Default interrupt handler has "// TODO" for timer interrupts which we need.
  */
 void _ulp_riscv_interrupt_handler(uint32_t q1) {
-  error_flags = 1;
+  // void _unused_ulp_riscv_interrupt_handler(uint32_t q1) {
+  error_flags++;
   // cause_q1 contains the IRQ number (0 for timer, 31 for peripheral, etc.)
 
   // IRQ 0: Internal Timer Interrupt
-  if (q1 & ULP_RISCV_INTERNAL_INTERRUPT) {
+  if (q1 & ULP_RISCV_TIMER_INT) {
     ulp_timer_isr();
+    return;
   }
 
   // IRQ 31: RTC Peripheral Interrupt
@@ -146,20 +155,60 @@ void _ulp_riscv_interrupt_handler(uint32_t q1) {
 
     REG_SET_FIELD(RTC_GPIO_STATUS_W1TC_REG, RTC_GPIO_STATUS_INT_W1TC,
                   rtc_io_status);
-  } else if (q1 & (1U << 1)) { // IRQ 1: EBREAK/ECALL/Illegal Instruction
-    error_flags |= ULP_ERR_FLAG_ILLEGAL_INSN;
-  } else if (q1 & (1U << 2)) { // IRQ 2: Bus Error
-    error_flags |= ULP_ERR_FLAG_BUS_ERROR;
-  } else {
-    // Unknown interrupt cause
-    error_flags |= ULP_ERR_FLAG_UNKNOWN_IRQ;
+
+    return;
   }
+
+  // if (q1 & (1U << 1)) { // IRQ 1: EBREAK/ECALL/Illegal Instruction
+  //   error_flags |= ULP_ERR_FLAG_ILLEGAL_INSN;
+  //   return;
+  // }
+
+  // if (q1 & (1U << 2)) { // IRQ 2: Bus Error
+  //   error_flags |= ULP_ERR_FLAG_BUS_ERROR;
+  //   return;
+  // }
+
+  // // Unknown interrupt cause
+  // error_flags |= ULP_ERR_FLAG_UNKNOWN_IRQ;
+}
+
+void ulp_gpio_enable_intr(gpio_num_t gpio_num,
+                          ulp_riscv_gpio_int_type_t intr_type) {
+  REG_SET_FIELD(RTC_GPIO_PIN0_REG + 4 * gpio_num, RTC_GPIO_PIN0_INT_TYPE,
+                intr_type);
+}
+
+void ulp_gpio_init_all() {
+  // Initialize the anemometer GPIO
+  ulp_riscv_gpio_init(ANEMOMETER_GPIO);
+  ulp_riscv_gpio_input_enable(ANEMOMETER_GPIO);
+  ulp_gpio_enable_intr(ANEMOMETER_GPIO, ULP_RISCV_GPIO_INTR_POSEDGE);
+
+  /* Register GPIO interrupt handler */
+  // ulp_riscv_gpio_isr_register(ANEMOMETER_GPIO, ULP_RISCV_GPIO_INTR_POSEDGE,
+  //                             anemometer_isr, NULL);
+
+  // Initialize the rain gauge GPIO
+  ulp_riscv_gpio_init(RAIN_GAUGE_GPIO);
+  ulp_riscv_gpio_input_enable(RAIN_GAUGE_GPIO);
+  ulp_gpio_enable_intr(RAIN_GAUGE_GPIO, ULP_RISCV_GPIO_INTR_POSEDGE);
+
+  // ulp_riscv_gpio_isr_register(RAIN_GAUGE_GPIO, ULP_RISCV_GPIO_INTR_POSEDGE,
+  //                             rain_gauge_isr, NULL);
 }
 
 int main(void) {
+  error_flags = 1;
+  ulp_gpio_init_all();
+
+  while (true) {
+    ulp_timer_isr();
+    ulp_riscv_delay_cycles(3000 * 1000 * ULP_RISCV_CYCLES_PER_US);
+  }
+
   // Main only called by timer.
-  error_flags++;
-  ulp_timer_isr();
+  // ulp_timer_isr();
 
   return 0;
 }

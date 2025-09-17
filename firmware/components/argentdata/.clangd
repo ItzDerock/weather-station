@@ -1,0 +1,4 @@
+CompileFlags:
+  Add: [
+    "-I/nix/store/p3qdzz8llb3ngh428br0hf0zk009wysb-esp-idf-v5.4/components/ulp/ulp_common/include/"
+  ]
